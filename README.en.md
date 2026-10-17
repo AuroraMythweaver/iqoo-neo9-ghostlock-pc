@@ -247,7 +247,7 @@ python3 scripts/ghostlock_profile.py dump profile.bin
 ```
 reroot.sh                          main script (the "script" half)
 ghostlock.bin                      payload pack (the "binary" half)
-README.md                          Chinese README (:zh:)
+README.md                          Chinese README
 README.en.md                       this file (English, independent)
 QUICKSTART.md                      shortest possible usage
 docs/PORTING.md                    full porting notes: byte-level protocol/format evidence, field log, cross-check with the author's article
