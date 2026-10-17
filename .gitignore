@@ -1,0 +1,13 @@
+# 第三方 APK 与解包产物（版权原因不分发）
+t.apk
+*.apk
+apkout/
+java/
+x/
+# python
+__pycache__/
+*.pyc
+# 运行时产物（保留 evidence/ 里的历史日志）
+/native-*.log
+/ksu-*.log
+/*.rc

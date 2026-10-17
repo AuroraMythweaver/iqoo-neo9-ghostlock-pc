@@ -1,0 +1,20 @@
+[*] root script start uid=0 euid=0
+[*] seccomp=Seccomp:	0 Seccomp_filters:	0 
+[*] manager=com.resukisu.resukisu kmi=android13-5.15
+[*] ksud=/data/app/~~u48heSHrr4o9Cv5fEPoC_g==/com.resukisu.resukisu-_hGjZIGiS2MEjt78OkmnPw==/lib/arm64/libksud.so
+[*] uname=5.15.197-g708015331567-dirty
+[*] debug terminal uid=0
+[*] iomem cache: cached 12758 bytes
+[*] fixup: attempt 1
+1+0 records in
+1+0 records out
+1 bytes (1 B) copied, 0.007 s, 142 B/s
+[*] policyload before=0 after=2
+[*] policy fixup rc=0
+[*] vrpatch: /data/local/tmp/ghostlock-app/vrpatch.ko
+Loaded kernel module: /data/local/tmp/ghostlock-app/vrpatch.ko
+[*] vrpatch exit=0
+[*] late-load pkg=com.resukisu.resukisu kmi=android13-5.15
+[*] late-load exit=0
+[+] KernelSU module loaded
+[*] script done
