@@ -1,5 +1,7 @@
 # GhostLock PC 化 · iQOO Neo9 (PD2338) 一键临时 root
 
+**中文** · [English](README.en.md)
+
 把手机上的 root App 壳搬到 PC：**一个脚本 + 一个二进制**，用 `adb` 驱动设备上那个原生 exploit，
 抢开机窗口拿临时 root（KernelSU late-load）。不需要解 BL 锁，不刷机，不写系统分区。
 
@@ -228,6 +230,8 @@ python3 scripts/ghostlock_profile.py dump profile.bin
 ```
 reroot.sh                          主脚本（脚本 + 一个二进制）
 ghostlock.bin                      payload 包
+README.md                          中文说明（本文件）
+README.en.md                       English README (independent, same content)
 QUICKSTART.md                      最短用法
 docs/PORTING.md                    PC 化全过程：协议/格式的字节级证据、实战记录、与作者帖子核对
 docs/ANALYSIS.md                   GhostLock v1.2 APK 的静态分析（漏洞链、vrpatch.ko 反汇编）
