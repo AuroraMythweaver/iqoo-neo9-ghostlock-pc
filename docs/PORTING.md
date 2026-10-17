@@ -2,6 +2,12 @@
 
 > 注：文中出现的 `apkout/`、`java/`、`x/`、`t.apk` 是本地解包/分析目录，因版权原因**未随仓库分发**；
 > 仓库里保留的是可复现的部分（脚本、blob、日志）。要重建 pack 请用你自己解包的 APK 产物。
+>
+> **原作者（酷安）**：<https://www.coolapk.com/U/43561117> ·《vivo iQOO Neo9 (PD2338) Root 研究》
+> <https://www.coolapk.com/feed/74180094> · **GhostLock 原项目**：YuKongA/ghostlock-app
+>
+> 本仓库专用于 **iQOO Neo9（PD2338）+ OriginOS 6（"橘子 6"，16.2.13.2）+ 内核 5.15.197-g708015331567-dirty**；
+> 仅供自有设备学习研究，详见 README 的《免责声明》。
 
 对象：`GhostLock-v1.2-IQOO-Neo9(545)-arm64.apk`
 sha256 = `9c85bd85cfe08db4891548574684256dbc33f751f392b4cfb2691d2226600a56`

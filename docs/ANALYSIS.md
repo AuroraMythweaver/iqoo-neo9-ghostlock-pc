@@ -1,6 +1,8 @@
 # GhostLock v1.2 (iQOO Neo9 定制版) 静态分析报告
 
 > 注：本文是 APK 静态分析记录，`apkout/`、`java/`、`x/` 等本地解包目录未随仓库分发。
+> 原作者（酷安）：<https://www.coolapk.com/U/43561117> ·《vivo iQOO Neo9 (PD2338) Root 研究》
+> 上游项目：YuKongA/ghostlock-app · 本文只做静态分析记录，专用于 iQOO Neo9 + OriginOS 6 特化版。
 
 分析对象：`GhostLock-v1.2-IQOO-Neo9(545)-arm64.apk`
 sha256 = 9c85bd85cfe08db4891548574684256dbc33f751f392b4cfb2691d2226600a56

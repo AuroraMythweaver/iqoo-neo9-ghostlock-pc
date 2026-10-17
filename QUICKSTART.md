@@ -1,4 +1,12 @@
-# 怎么用（iQOO Neo9 / PD2338 重新 root）
+# 怎么用（iQOO Neo9 / PD2338 · OriginOS 6「橘子 6」特化版）
+
+> 原作者（酷安）：<https://www.coolapk.com/U/43561117>
+> 原文：《vivo iQOO Neo9 (PD2338) Root 研究》<https://www.coolapk.com/feed/74180094>
+> GhostLock 原项目：[YuKongA/ghostlock-app](https://github.com/YuKongA/ghostlock-app)
+>
+> 本仓库的 `ghostlock.bin` **只适用于** iQOO Neo9（PD2338）+ OriginOS 6 16.2.13.2 +
+> 内核 `5.15.197-g708015331567-dirty`。换机型/固件请勿直接使用（会 panic）。
+> 仅供自有设备学习研究，**风险自担**，完整条款见 README 的《免责声明》。
 
 本仓库根目录下只有两个文件要用：
 
@@ -28,4 +36,4 @@ adb shell su -c 'id'        # uid=0(root) context=u:r:ksu:s0
 注意：`late-load` 只在内存里，**重启就没了**，重启后再跑一次 `./reroot.sh` 即可；
 `vrpatch.ko` 的补丁在软重启后存活。
 
-细节见 `ghostlock-pc-port.md`（§8 实战、§9 与作者帖子核对）和 `scripts/README.md`。
+细节见 `README.md`、`docs/PORTING.md`（§8 实战、§9 与作者帖子核对）、`scripts/README.md`。

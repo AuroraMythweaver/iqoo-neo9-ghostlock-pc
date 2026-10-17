@@ -20,6 +20,37 @@ $ ./reroot.sh
 
 ---
 
+## 原作者与来源（先看这个）
+
+| 项目 | 内容 |
+|---|---|
+| **原作者（酷安主页）** | <https://www.coolapk.com/U/43561117> |
+| **原文** | 《vivo iQOO Neo9 (PD2338) Root 研究》 <https://www.coolapk.com/feed/74180094> |
+| **GhostLock 原项目** | [YuKongA/ghostlock-app](https://github.com/YuKongA/ghostlock-app)（本 APK 为其 iQOO Neo9 定制 fork：`GhostLock-v1.2-IQOO-Neo9(545)-arm64.apk`） |
+| **原语 / 工具致谢** | x-spy / [CVE-2026-43499-popsicle](https://github.com/x-spy/CVE-2026-43499-popsicle)、NebuSec / CyberMeowfia；管理器 KernelSU / ReSukiSU |
+| **本仓库做了什么** | 只做 **PC 侧驱动器 + 打包 + 可复现记录**；漏洞利用本体、内核偏移、`vr.ko` 处理方案**全部来自原作者与原项目** |
+
+> 本项目的窗口判定、`vrpatch` 用法、KSU late-load 路线均以原作者文章为准，并逐条与真机实测对齐
+> （见 [`docs/PORTING.md`](docs/PORTING.md) §9 的对照表）。**请先去原作者主页看原文。**
+
+## 适用机型：iQOO Neo9 · OriginOS 6（橘子 6）**特化版**
+
+本仓库的 `ghostlock.bin` 是**专用于**下面这套组合的特化版，不是通用包：
+
+| 项 | 值 |
+|---|---|
+| 机型 | vivo iQOO Neo9（PD2338 / V2338A，骁龙 8 Gen 2 / SM8550） |
+| 系统 | **OriginOS 6（"橘子 6"）**，16.2.13.2 |
+| 内核 | **`5.15.197-g708015331567-dirty`** |
+| APK 依据 | `GhostLock-v1.2-IQOO-Neo9(545)-arm64.apk`（linux-tools 定制 fork） |
+| 利用漏洞 | CVE-2026-43499（rtmutex / futex-PI 竞态，即 GhostLock） |
+
+profile 里的 `task_struct` / `cred` / 内核符号偏移 / 路由几何 / 时序，都是按**这颗内核**实测标定的。
+换机型、换 OriginOS 版本（哪怕同样是 5.15）**都不要直接套用** —— offset 不匹配会 panic
+（设备一般能自行重启恢复，但别拿它去试别的机器）。脚本运行前会自动比对 `uname -r`，不一致直接拒绝。
+
+---
+
 ## 1. 这是什么 / 不是什么
 
 | 是 | 不是 |
@@ -170,28 +201,40 @@ evidence/ksu-*.log                 成功那轮的 root 脚本日志（policy fi
 evidence/native-*.log              成功那轮的 native 日志（boot_ms=40663 起）
 ```
 
-## 9. 安全与授权
+## 9. 安全边界
 
-- 仅用于**你自己持有并授权的设备**；它做的是内核提权，等同于本机最高权限，风险自负。
-- 不修改系统分区、不刷机、不写 boot；失败时依赖设备自身的 panic→重启恢复。
-- 本仓库**不分发** GhostLock APK 或其解包结果（`classes.dex`、`assets/`、`libextract.so` 等），
-  只分发我写的脚本/文档，以及为方便复现而打包的必需二进制（见 NOTICE）。
-- 上游项目/作者已在公开渠道发布过这套 exploit 与工具链；这里的工作是**工程化的 PC 侧驱动 +
-  可复现的记录**，不包含新的漏洞细节。
+- 只做**内核内存写 + cred 替换 + `ksud insmod` / `late-load`**；不刷机、不改 boot、不写系统分区
+  （系统分区保持 erofs + dm-verity green）。
+- 文件系统层面只碰 `$HOME`（`/data/local/tmp/ghostlock-app`）、`/sys/fs/selinux/*`；
+  `safe_mode=0`，所以也不动 `/data/adb/modules`。
+- 失败表现为内核 panic → 设备自行重启恢复（数据不丢），脚本会等它回来继续。
+- **临时 root**：`late-load` 只在内存里，硬重启即失效；软重启后 `vrpatch` 的文本补丁仍在。
+- 收尾 SELinux 仍是 **Enforcing**（靠 policy fixup + `ksu` 域），不是关掉 SELinux。
 
-## 10. 致谢
+## 10. 免责声明（Disclaimer）
 
-- **@图灵和冯诺依曼老祖保佑我** — 酷安《vivo iQOO Neo9 (PD2338) Root 研究》，本项目的窗口、
-  `vrpatch` 处理方式、KSU late-load 路线都以其结论为准，并逐条与实测对齐。
-- **YuKongA/ghostlock-app** — GhostLock 上游（本 APK 是 linux-tools 的 iQOO Neo9 定制 fork）。
-- **x-spy / CVE-2026-43499-popsicle** — futex-PI 竞态原语。
-- **NebuSec / CyberMeowfia** — 相关工具与方法。
-- **KernelSU / ReSukiSU** — 内核模块与管理器（本机管理器为 `com.resukisu.resukisu`）。
+1. **用途限定**：本项目仅供**个人学习、移动安全研究、自有设备维护**使用。使用者须确保对操作设备
+   拥有完全所有权与明确授权。
+2. **风险自担**：本工具执行**内核级提权**，可能导致设备重启/临时不稳定、数据丢失、保修失效、
+   OTA 更新异常，以及被银行/支付/游戏等应用的完整性检测识别。请自行评估风险，操作前**备份重要数据**。
+3. **无担保（AS-IS）**：本仓库按"现状"提供，不附带任何明示或暗示的担保，包括但不限于适销性、
+   特定用途适用性、不侵权担保。作者与贡献者**不对**因使用或无法使用本项目导致的任何直接、间接、
+   附带、特殊或后果性损害承担责任。
+4. **禁止滥用**：严禁用于**未经授权的设备、他人设备、批量控制、绕过安全机制实施违法行为、
+   游戏作弊/外挂、商业化分发**，或任何违反当地法律法规与中国大陆相关规定的用途。
+   因滥用产生的一切法律责任与后果由使用者自行承担。
+5. **第三方组件**：本仓库**不分发** GhostLock APK 及其解包产物；`ghostlock.bin` 内嵌的
+   `libghostlock.so`、`vrpatch.ko` 版权归原作者/上游项目所有，此处仅为在同一设备上复现而**原样打包、
+   未做修改**。本仓库自写的脚本与文档（`reroot.sh`、`scripts/*`、`docs/*`、`README.md`）可按 MIT 使用。
+   若相关权利人认为不妥，请联系删除，会立即处理。
+6. **接受条款**：使用、克隆、分发或以任何方式使用本项目，即视为你已阅读、理解并同意上述全部条款；
+   若不同意，请立即停止使用并删除本仓库内容。
 
-## 11. NOTICE
+## 11. 致谢
 
-`ghostlock.bin` 内嵌的 `libghostlock.so` 与 `vrpatch.ko` 来自上述上游项目（随 GhostLock v1.2
-APK 分发），版权归原作者；本仓库仅为在同一设备上复现而原样打包，未做修改。本仓库自身写的脚本与
-文档（`reroot.sh`、`scripts/*`、`docs/*`、`README.md`）可按 MIT 使用。
-
-如果你要把它推成 public，请自行确认上游许可证与当地法规；默认建议保持 private。
+- **@图灵和冯诺依曼老祖保佑我**（酷安 <https://www.coolapk.com/U/43561117>）—— 原文
+  《vivo iQOO Neo9 (PD2338) Root 研究》是整个工作的基础。
+- **YuKongA/ghostlock-app** —— GhostLock 上游（本 APK 是 linux-tools 的 iQOO Neo9 定制 fork）。
+- **x-spy / CVE-2026-43499-popsicle** —— futex-PI 竞态原语。
+- **NebuSec / CyberMeowfia** —— 相关工具与方法。
+- **KernelSU / ReSukiSU** —— 内核模块与管理器（本机管理器为 `com.resukisu.resukisu`）。
