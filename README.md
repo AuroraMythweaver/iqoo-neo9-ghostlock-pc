@@ -44,6 +44,18 @@ chmod +x *.sh
 adb shell su -c 'id'
 ```
 
+包里有什么：
+
+```
+ghostlock-pc-v1.1/
+├── reroot.sh         主脚本（Linux/WSL）      ├── install-ksu.sh  提权后装 ko/管理器
+├── reroot-mac.sh     主脚本（macOS 专用）     ├── clean.sh        清理（默认 dry-run）
+├── ghostlock.bin     payload（exploit 三件套）└── README / QUICKSTART / SHA256SUMS
+```
+
+> **不含** KSU 管理器 APK、也不含 `.ko`：管理器装在手机上（脚本会用它的 `libksud.so`），
+> `.ko` 要自定义时由你自己放进本目录。
+
 ## 三、它做了什么（通俗版）
 
 1. 从 `ghostlock.bin` 里解出 exploit，等手机**刚开机那十几秒**（实测 30–45 秒命中率最高）
@@ -95,6 +107,27 @@ adb shell su -c 'id'
 
 已实测组合：**SukiSU-Ultra v4.2.1（uapi 5）+ `android13-5.15_kernelsu.ko`** → 首页「工作中 · 越狱模式」。
 
+### ko 从哪来
+
+官方 release 带 **LKM 资产**（每个 KMI 一个 zip，解出来就是明文 `.ko`）：
+
+```bash
+gh release download v4.2.0 --repo SukiSU-Ultra/SukiSU-Ultra \
+    --pattern "aarch64-android13-5.15-lkm.zip"
+unzip aarch64-android13-5.15-lkm.zip        # → android13-5.15_kernelsu.ko (385 528 B)
+```
+
+| 你的内核 | 选这个资产 |
+|---|---|
+| 5.15（本机） | `aarch64-android13-5.15-lkm.zip` |
+| 5.10 | `aarch64-android13-5.10-lkm.zip` |
+| 6.1 / 6.6 / 6.12 | `aarch64-android14-6.1-lkm.zip` 等 |
+
+ko 里的 `vermagic` 是官方 GKI 分支的版本号（如 `5.15.202-…`），与你内核的 `5.15.197-…` 不同是正常的：
+加载器会按内核要求改写 vermagic 再重试。
+
+也可以自己从 SukiSU 的 `kernel/` 源码编，或直接用作者提供的 ko。
+
 ## 六、清理
 
 ```bash
@@ -113,6 +146,8 @@ adb shell su -c 'id'
 - **管理器提示"需要更新内核"？** 管理器 uapi 比内核高，换与 ko 同版本的管理器。
 - **多刷几次会伤手机吗？** 不写系统分区；失败是内核 panic 重启，不丢数据。
 - **macOS 上跑不动？** 用 `reroot-mac.sh`（`reroot.sh` 依赖 GNU 工具）。
+- **包里为什么没有管理器 APK / .ko？** 管理器是手机上的第三方 App（装上即可，脚本只读它的
+  `libksud.so`）；`.ko` 版本要你自己选，塞进包里等于把版本钉死。
 
 ## 八、来源与免责
 

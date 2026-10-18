@@ -1,5 +1,10 @@
 # GhostLock PC 化复现（不经 App / 不经 Shizuku）
 
+> **说明**：本文是当时的实验记录（含已废弃的流程，例如早期脚本每轮主动 `adb reboot`）。
+> 现在脚本的对外行为以 [README](../README.md) / [QUICKSTART](../QUICKSTART.md) 为准：
+> **不会主动重启**、root 脚本启动后停火、并支持 `--ko` / `--clean-after`。
+
+
 > 注：文中出现的 `apkout/`、`java/`、`x/`、`t.apk` 是本地解包/分析目录，因版权原因**未随仓库分发**；
 > 仓库里保留的是可复现的部分（脚本、blob、日志）。要重建 pack 请用你自己解包的 APK 产物。
 >

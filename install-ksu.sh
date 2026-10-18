@@ -3,8 +3,11 @@
 # install-ksu.sh —— 提权之后：加载你自己的 .ko，并安装配套的 KSU 管理器
 #
 #   和原作者 APK 用同一个加载器（ksuinit::load_module）：
-#     ksud insmod <你的.ko> allow_shell=1     ← ko 由你提供，不取 APK 内嵌
+#     ksud insmod <你的.ko> allow_shell=1     ← ko 是明文文件，由你提供
 #     ksud late-load ...                      ← 此时模块已在，只做用户态 bootstrap
+#
+#   ⚠ 本脚本**不会**从 APK / libksud.so 里解出 ko（那是编进二进制的数据段，不是文件）。
+#     它只用管理器 APK 里的 libksud.so 作为 ksud 可执行文件（loader）。
 #
 #   把 xxx_kernelsu.ko / 管理器.apk 放在本脚本同级目录，先 ./reroot.sh 提权，再：
 #

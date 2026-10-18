@@ -3,37 +3,38 @@
 > 仓库根目录的 `reroot.sh` + `ghostlock.bin` 是日常入口；本目录放的是可复现/可调参的工具。
 > 文中 `apkout/`、`evidence/` 等路径以本仓库结构为准（`evidence/` 已在仓库里）。
 
-## 一、最简形态：一个脚本 + 一个二进制（下次只用这两个）
+## 一、日常入口（仓库根目录的 4 个脚本 + 1 个 payload）
 
 ```
-ghostlock/
-├── reroot.sh        脚本：纯 bash + adb，自己从包里拆 payload、抢启动窗口
-└── ghostlock.bin    payload 包（736 303 B）：libghostlock.so + vrpatch.ko + profile.bin + release
+ghostlock-pc-v1.1/
+├── reroot.sh         主脚本（Linux/WSL）
+├── reroot-mac.sh     主脚本（macOS 专用）
+├── install-ksu.sh    提权后加载你自己的 .ko / 装任意 KSU 管理器
+├── clean.sh          清理 / 卸载（默认 dry-run）
+└── ghostlock.bin     payload：libghostlock.so + vrpatch.ko + profile.bin + release
 ```
 
 ```bash
-# 在解压后的目录里（该目录含 reroot.sh 与 ghostlock.bin）
-./reroot.sh                  # 最多 10 轮：等开机窗口 → 发射 → 命中即停（不主动重启）
-./reroot.sh 20               # 想多刷几轮
-./reroot.sh --check          # 只看当前有没有 root
-./reroot.sh --inspect        # 看包里有什么
-./reroot.sh --deploy         # 只布署 payload，不打
-./reroot.sh --check-payload  # 看设备上的 payload 是否已就绪（不会重推）
-./clean.sh                   # 清理清单（dry-run，默认不动手）
+./reroot.sh                          # 最多 10 轮：等开机窗口 → 发射 → 命中即停
+./reroot.sh --check                  # 只看当前有没有 root
+./reroot.sh --inspect                # 看包里有什么
+./reroot.sh --deploy                 # 只布署 payload
+./reroot.sh --ko 1 --clean-after     # 一条龙：选 ko → 提权 → 成功后清理 → 退出
+./install-ksu.sh                     # 提权后：列本目录 ko / 管理器 apk
+./clean.sh                           # 清理清单（--yes 才删）
 
-# macOS 用 ./reroot-mac.sh（同样的参数）
+# macOS 把 reroot.sh 换成 reroot-mac.sh，参数相同
 ```
 
-它做的事（每一步都有实测依据）：
+它做的事：
 
-1. 已 root 就直接退出，不碰设备（幂等，不会把到手的 root 重启掉）；
-2. 从 `ghostlock.bin` 拆出 `libghostlock.so` / `vrpatch.ko` / `profile.bin`，
-   与设备上的文件逐个比大小，不一致才推（`--redeploy` 强制重推）；
-3. 比对包里的 `release` 与设备 `uname -r`，不一致**直接拒绝**（`--force` 才硬打）；
-4. 死等 `adb shell` 可用 → **立刻发射**（窗口约 boot 后 12~45 秒）；**脚本不主动重启**，
-   打崩/卡死时手机自己重启，脚本等它回来；
-5. 盯 root 脚本日志，出现 `KernelSU module loaded` 即成功并**立即停手**；
-6. 没中/panic 重启 → 自动等回来继续；窗口内还会连刷（`PER_BOOT` 次）。
+1. 已 root 就直接退出（幂等，不碰设备）；
+2. 从 `ghostlock.bin` 拆出三个文件，与设备上的比大小，不一致才推（`--redeploy` 强制重推）；
+3. 比对包里的 `release` 与设备 `uname -r`，不一致直接拒绝（`--force` 才硬打）；
+4. 死等 `adb shell` 可用 → 立刻发射（窗口约 boot 后 12~45 秒，实测 30~45 秒最好）；
+5. root 脚本一旦启动就**停止发射**，只等 `KernelSU module loaded`；
+6. 没中/panic 重启 → 等回来继续；窗口内最多刷 `PER_BOOT` 次；
+7. 没打中时脚本**不会主动重启**手机，靠 panic 自重启或你手动重启。
 
 可调环境变量：`TIMEOUT=180`（单次盯多久）、`PER_BOOT=6`、`WINDOW=90`（uptime 超过就不打了）、
 `GL_DIR=/data/local/tmp/...`（换设备端目录，测试用）。

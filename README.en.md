@@ -45,6 +45,18 @@ Then:
 adb shell su -c 'id'
 ```
 
+What is inside the archive:
+
+```
+ghostlock-pc-v1.1/
+├── reroot.sh         main script (Linux/WSL)   ├── install-ksu.sh  load your ko / install a manager
+├── reroot-mac.sh     main script (macOS)       ├── clean.sh        cleanup (dry-run by default)
+├── ghostlock.bin     payload (3 exploit files)  └── README / QUICKSTART / SHA256SUMS
+```
+
+> No KSU manager APK and no `.ko` inside: the manager lives on the phone (the script only reads its
+> `libksud.so`), and a custom `.ko` is something you drop into this directory yourself.
+
 ## 3. What it actually does (plain version)
 
 1. Unpacks the exploit from `ghostlock.bin` and waits for the phone to be **just a few seconds into a boot**
@@ -101,6 +113,25 @@ Put your `xxx_kernelsu.ko` and the manager APK next to the script:
 
 Verified combination: **SukiSU-Ultra v4.2.1 (uapi 5) + `android13-5.15_kernelsu.ko`** → "Working · jailbreak mode".
 
+### Where to get a ko
+
+Official releases ship **LKM assets** (one zip per KMI; unzip it and you get a plain `.ko`):
+
+```bash
+gh release download v4.2.0 --repo SukiSU-Ultra/SukiSU-Ultra \
+    --pattern "aarch64-android13-5.15-lkm.zip"
+unzip aarch64-android13-5.15-lkm.zip        # -> android13-5.15_kernelsu.ko (385,528 B)
+```
+
+| Your kernel | Asset |
+|---|---|
+| 5.15 (this device) | `aarch64-android13-5.15-lkm.zip` |
+| 5.10 | `aarch64-android13-5.10-lkm.zip` |
+| 6.1 / 6.6 / 6.12 | `aarch64-android14-6.1-lkm.zip` etc. |
+
+The `vermagic` inside is the GKI branch version (e.g. `5.15.202-...`); a mismatch with your kernel
+(`5.15.197-...`) is fine — the loader rewrites it to what the kernel asks for and retries.
+
 ## 6. Cleanup
 
 ```bash
@@ -122,6 +153,9 @@ Everything in memory (KSU module, vrpatch patch, SELinux state) **disappears on 
 - **Will repeated attempts damage the phone?** No system-partition writes; a miss is a kernel panic reboot,
   no data loss.
 - **Doesn't work on macOS?** Use `reroot-mac.sh` (`reroot.sh` relies on GNU tools).
+- **Why no manager APK / no .ko in the archive?** The manager is a third-party app on the phone (the
+  script only reads its `libksud.so`), and pinning a `.ko` version inside the archive would defeat the
+  point of supplying your own.
 
 ## 8. Credits and disclaimer
 

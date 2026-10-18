@@ -4,57 +4,65 @@
 > 原文：《vivo iQOO Neo9 (PD2338) Root 研究》<https://www.coolapk.com/feed/74180094>
 > GhostLock 原项目：[YuKongA/ghostlock-app](https://github.com/YuKongA/ghostlock-app)
 >
-> 本仓库的 `ghostlock.bin` **只适用于** iQOO Neo9（PD2338）+ OriginOS 6 16.2.13.2 +
+> `ghostlock.bin` **只适用于** iQOO Neo9（PD2338）+ OriginOS 6 16.2.13.2 +
 > 内核 `5.15.197-g708015331567-dirty`。换机型/固件请勿直接使用（会 panic）。
-> 仅供自有设备学习研究，**风险自担**，完整条款见 README 的《免责声明》。
+> 仅供自有设备学习研究，风险自担。
 
-## 先用 30 秒做完手机侧准备
+## 30 秒手机侧准备
 
-1. **USB 数据线连电脑**（数据线，不是仅充电线），`adb devices` 能看到 `device`；
-2. 开发者选项 → **USB 调试**打开，弹窗勾"始终允许这台电脑"；
-3. 开发者选项 → **停止限制子进程**（后台进程限制设"标准"）；
-4. **去掉锁屏密码** + **去掉所有锁屏**（含"卡屏即进入系统"）；
-5. 开发者选项 → **默认 USB 配置 = 文件传输（MTP）**；建议屏幕常亮、关省电。
+1. **USB 数据线连电脑**（数据线，不是仅充电线），`adb devices` 能看到 `device`
+2. 开发者选项 → **USB 调试**打开，弹窗勾"始终允许这台电脑"
+3. 开发者选项 → **停止限制子进程**（后台进程限制设"标准"）
+4. **去掉锁屏密码** + **去掉所有锁屏**
+5. 开发者选项 → **默认 USB 配置 = 文件传输（MTP）**；建议屏幕常亮、关省电
 
-不需要装 GhostLock App / Shizuku（装过的话先别打开）。成功之后**别重启**。
+不需要装 GhostLock App / Shizuku。
 
-本仓库根目录下只有两个文件要用：
+## 解压后有什么
 
 ```
-reroot.sh        脚本（Linux/WSL，纯 bash + adb）
-reroot-mac.sh    脚本（macOS 专用版，只依赖系统自带工具）
-ghostlock.bin    payload 包（libghostlock.so + vrpatch.ko + profile.bin）
+ghostlock-pc-v1.1/
+├── reroot.sh         主脚本（Linux/WSL）
+├── reroot-mac.sh     主脚本（macOS 专用，只依赖系统自带工具）
+├── install-ksu.sh    提权后：加载你自己的 .ko、装任意 KSU 管理器
+├── clean.sh          清理 / 卸载（默认 dry-run）
+├── ghostlock.bin     payload（libghostlock.so + vrpatch.ko + profile.bin）
+├── README.md / QUICKSTART.md
+└── SHA256SUMS.txt
 ```
 
-> **macOS 用 `./reroot-mac.sh`**：BSD `dd` 没有 `iflag=`、系统没有 `timeout`、默认 shell 是 zsh ——
-> `reroot.sh` 在这三点上会失败（报"包里没有 libghostlock.so"/状态全空），mac 版已经全部适配。
+> 包里**不含** KSU 管理器 APK 和 `.ko`：管理器装在手机上，`.ko` 由你自己提供
+> （官方 LKM 资产或自己编），详见 README §五。
+
+## 跑
 
 ```bash
-git clone <this-repo> && cd <repo>
+chmod +x *.sh
 
-./reroot.sh                  # 最多 10 轮：等开机窗口 → 发射 → 命中即停（脚本不主动重启）
-./reroot.sh 20               # 多刷几轮
-./reroot.sh --no-reboot      # 设备刚重启过 / 手动重启完：直接抢窗口
-./reroot.sh --check          # 只看当前有没有 root（不会重启）
-./reroot.sh --inspect        # 看包里有什么
-./reroot.sh --deploy         # 只布署 payload，不打
-./reroot.sh --check-payload  # 看设备上 payload 是否已就绪
+./reroot.sh                          # 最多 10 轮：等开机窗口 → 发射 → 命中即停
+./reroot.sh --check                  # 只看当前有没有 root（不发射）
+./reroot.sh --inspect                # 看 payload 包里有什么
+./reroot.sh --deploy                 # 只部署 payload，不打
+./reroot.sh --ko 1 --clean-after     # 一条龙：列 ko → 选 → 提权 → 成功后清理 → 退出
+
+# macOS 全程把 reroot.sh 换成 reroot-mac.sh
 ```
 
 成功后：
 
 ```bash
-adb shell su -c 'id'        # uid=0(root) context=u:r:ksu:s0
+adb shell su -c 'id'                 # uid=0(root) context=u:r:ksu:s0
 ```
 
-注意：`late-load` 只在内存里，**重启就没了**，重启后再跑一次 `./reroot.sh` 即可；
-`vrpatch.ko` 的补丁在软重启后存活。
-
-收尾清理（默认只列不动手）：
+## 之后
 
 ```bash
-./clean.sh                          # 看清单
-./clean.sh --yes --all --reboot     # 真清 + 重启（内核态随之清空）
+./install-ksu.sh                     # 提权后：列本目录的 ko / 管理器 apk
+./install-ksu.sh --ko 1 --install 1  # 加载你的 ko + 装管理器
+./clean.sh                           # 清理清单（--yes 才删）
+./clean.sh --yes --all --reboot      # 全清 + 重启，回到干净系统
 ```
 
-细节见 `README.md`、`docs/PORTING.md`（§8 实战、§9 与作者帖子核对）、`scripts/README.md`。
+`late-load` 只在内存里，**重启就没了**，重启后重跑 `./reroot.sh` 即可。
+
+细节见 `README.md`；实测数据与踩坑记录见 `docs/FIELD-NOTES.md`。

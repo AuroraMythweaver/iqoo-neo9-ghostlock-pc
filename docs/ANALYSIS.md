@@ -130,7 +130,7 @@ native 侧还有第二层针对 vr.ko 的处理：
   `≥1`；实战用的是设备上那份 2058 B blob（`1/1` + `compact_waiter=1` + `vr_sys_exit_tp`）。
 - **命中是开机窗口竞争**：历史日志 `boot_ms` 与结果强相关（14 s / 41 s 能过 W1；>60 s 全部
   `Write 1 failed`；12 min~22 h 必挂），失败表现为 panic 自动重启。
-- 产物：`reroot.sh` + `ghostlock.bin`（**两个文件带走**：重启→抢窗口→盯 ksu 日志→命中即停）、
+- 产物：脚本 + `ghostlock.bin`（**两个文件带走**：等开机窗口→发射→盯 ksu 日志→命中即停）、
   `scripts/ghostlock_profile.py`（.conf → blob，带 native 白名单校验）、
   `scripts/ghostlock_pc.py`（adb 驱动：check/setup/run/status/exec/pull-log）、
   `evidence/`（成功那轮的 native/root 脚本日志 + 那份 2058 B blob）。
