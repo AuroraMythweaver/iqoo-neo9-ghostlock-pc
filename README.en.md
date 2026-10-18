@@ -280,7 +280,8 @@ python3 scripts/ghostlock_profile.py dump profile.bin
 ## 8. Layout
 
 ```
-reroot.sh                          main script (the "script" half)
+reroot.sh                          main script (Linux/WSL, the "script" half)
+reroot-mac.sh                      macOS variant (v1.0.0-mac; BSD dd / no timeout / no seq)
 ghostlock.bin                      payload pack (the "binary" half)
 README.md                          Chinese README
 README.en.md                       this file (English, independent)
