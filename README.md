@@ -261,7 +261,7 @@ python3 scripts/ghostlock_profile.py dump profile.bin
 
 ```
 reroot.sh                          主脚本（Linux/WSL）
-reroot-mac.sh                      macOS 专用脚本（v1.0.0-mac；BSD dd / 无 timeout / 无 seq）
+reroot-mac.sh                      macOS 专用脚本（BSD dd / 无 timeout / 无 seq）
 ghostlock.bin                      payload 包
 README.md                          中文说明（本文件）
 README.en.md                       English README (independent, same content)
