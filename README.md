@@ -257,26 +257,60 @@ python3 scripts/ghostlock_profile.py dump profile.bin
   `safe_mode=0` 所以也不动 `/data/adb/modules`。
 - **SELinux 最后是 Enforcing**（不是 permissive）：靠 policy fixup + `ksu` 域拿的 root。
 
-## 8. 目录
+## 8. 目录结构
+
+### 8.1 仓库
 
 ```
-reroot.sh                          主脚本（Linux/WSL）
-reroot-mac.sh                      macOS 专用脚本（BSD dd / 无 timeout / 无 seq）
-clean.sh                           清理/卸载（默认 dry-run；内存态靠 reboot）
-ghostlock.bin                      payload 包
-README.md                          中文说明（本文件）
-README.en.md                       English README (independent, same content)
-QUICKSTART.md                      最短用法
-docs/PORTING.md                    PC 化全过程：协议/格式的字节级证据、实战记录、与作者帖子核对
-docs/ANALYSIS.md                   GhostLock v1.2 APK 的静态分析（漏洞链、vrpatch.ko 反汇编）
-docs/root-script.sh.tmpl           从 libghostlock.so 里整段抽出的 root 脚本模板（7349 B）
-scripts/mkpack.py                  打/看 payload 包
-scripts/ghostlock_profile.py       .conf → native 二进制 profile blob（白名单校验）
-scripts/ghostlock_pc.py            完整 python 驱动（调参/取证用，含 check/run/status 等）
-scripts/README.md                  脚本层说明
-evidence/profile.bin               真机打通过的那份 2058 B blob
-evidence/ksu-*.log                 成功那轮的 root 脚本日志（policy fixup → vrpatch → late-load）
-evidence/native-*.log              成功那轮的 native 日志（boot_ms=40663 起）
+.
+├── reroot.sh                 主脚本（Linux/WSL；不主动重启、root 脚本起来后停火）
+├── reroot-mac.sh             macOS 专用脚本（BSD dd / 无 timeout / 无 seq）
+├── clean.sh                  清理 / 卸载（默认 dry-run）
+├── ghostlock.bin             payload 包（GLPACK01，格式见 §3）
+├── README.md / README.en.md  说明（中/英，各自独立）
+├── QUICKSTART.md             最短用法
+├── docs/
+│   ├── PORTING.md            PC 化全过程：字节级协议证据、实战记录、与作者帖子核对
+│   ├── ANALYSIS.md           GhostLock v1.2 APK 的静态分析
+│   └── root-script.sh.tmpl   从 libghostlock.so 抽出的 root 脚本模板（7349 B）
+├── scripts/                  调参 / 取证工具（日常不需要）
+│   ├── ghostlock_pc.py       完整 python 驱动（check/setup/run/status/exec/pull-log）
+│   ├── ghostlock_profile.py  .conf → native 二进制 blob（带白名单校验）
+│   ├── mkpack.py             打 / 看 payload 包
+│   └── README.md             脚本层说明
+└── evidence/                 真机成功的原始证据
+    ├── profile.bin           打通过的那份 2058 B blob
+    ├── ksu-1792264567-6-1.log     成功那轮的 root 脚本日志
+    └── native-1792264567-6-1.log  成功那轮的 native 日志（boot_ms=40663 起）
+```
+
+### 8.2 设备端（`reroot.sh` / `reroot-mac.sh` 自动部署）
+
+```
+/data/local/tmp/ghostlock-app/          ← 工作目录（clean.sh --yes 删除）
+├── libghostlock.so   484 840 B         来自 ghostlock.bin
+├── vrpatch.ko        249 224 B         来自 ghostlock.bin
+├── profile.bin         2 058 B         来自 ghostlock.bin
+├── glrun.sh                            运行时脚本（reroot.sh 生成）
+├── native-<runid>.log / .rc            native 输出与退出码（含内核地址，注意隐私）
+├── ksu-<runid>.log                     root 脚本日志（policy → vrpatch → late-load）
+├── .ghostlock_root.sh                  native 内嵌写出的 root 脚本
+├── .ghostlock_iomem                    /proc/iomem 缓存
+└── .gl_out / .gl_cmd                   root 调试终端（后台子壳，脚本退出即失效）
+
+/data/adb/ksud              5 679 064 B   管理器铺的 ksud（clean.sh --ksu 才删）
+/data/adb/ksu/{bin,lib,log,profile,KernelSU_越狱}   KSU 用户态（--ksu）
+/data/app/~~*/com.resukisu.resukisu-*/lib/arm64/libksud.so   late-load 实际调用的就是它
+com.resukisu.resukisu                     管理器 APK（clean.sh --uninstall 才卸）
+```
+
+### 8.3 内存态（reboot 即消失，`clean.sh` 不删也删不掉）
+
+```
+kernelsu           late-load 进来的内核模块
+vrpatch 的补丁      vr.ko  .text+0x2ecc  的 8 字节（mov w0,#0; ret）
+SELinux            W1 写的 enforcing + load_policy 换上来的 policy
+临时 cred          子进程的 init_cred 拷贝（子进程退出即无）
 ```
 
 ## 9. 安全边界
