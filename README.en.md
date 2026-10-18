@@ -282,6 +282,7 @@ python3 scripts/ghostlock_profile.py dump profile.bin
 ```
 reroot.sh                          main script (Linux/WSL, the "script" half)
 reroot-mac.sh                      macOS variant (BSD dd / no timeout / no seq)
+clean.sh                           cleanup/uninstall (dry-run by default; in-memory state needs a reboot)
 ghostlock.bin                      payload pack (the "binary" half)
 README.md                          Chinese README
 README.en.md                       this file (English, independent)
@@ -309,6 +310,30 @@ evidence/native-*.log              native log of the successful run (from boot_m
 - **Temporary root**: `late-load` lives in RAM and is lost on a hard reboot; the `vrpatch` text patch
   survives a soft reboot.
 - SELinux stays **Enforcing** at the end (via policy fixup + the `ksu` domain) — SELinux is not turned off.
+
+## Cleanup / uninstall
+
+The leftovers come in two kinds — deleting files alone is not enough:
+
+| Kind | What | How |
+|---|---|---|
+| **In memory** | the `kernelsu` late-load module, the 8-byte `vrpatch` patch on `vr.ko`, the SELinux state / `load_policy` patch from W1, the temporary cred | **gone after a reboot** — no files to delete |
+| **On disk** | `/data/local/tmp/ghostlock-app` (payload + logs + root script), test dirs, `/data/adb/ksud` + `/data/adb/ksu/*` (~91 MB), the manager APK | delete with `clean.sh` |
+
+```bash
+./clean.sh                       # dry-run: list what would be deleted + sizes (default)
+./clean.sh --yes                 # delete work/test dirs + stop leftover exploit processes
+./clean.sh --yes --ksu           # also remove the KSU userland (/data/adb/ksud, /data/adb/ksu/*)
+./clean.sh --yes --uninstall     # also uninstall the manager (com.resukisu.resukisu)
+./clean.sh --yes --all --reboot  # back to a clean system in one shot (recommended)
+```
+
+**Order matters**: delete files **while root is still there** (some logs under `/data/local/tmp` are owned
+by root, the shell cannot remove them), **then reboot** to clear the in-memory state (root goes away too).
+`clean.sh` only lists by default; `--yes` is required to actually delete.
+
+> Nothing is ever deleted without your go-ahead. `--ksu` touches the KSU userland (it affects other KSU
+> modules) and `--uninstall` removes the manager, so both are explicit opt-in flags.
 
 ## 10. Disclaimer
 

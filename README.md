@@ -262,6 +262,7 @@ python3 scripts/ghostlock_profile.py dump profile.bin
 ```
 reroot.sh                          主脚本（Linux/WSL）
 reroot-mac.sh                      macOS 专用脚本（BSD dd / 无 timeout / 无 seq）
+clean.sh                           清理/卸载（默认 dry-run；内存态靠 reboot）
 ghostlock.bin                      payload 包
 README.md                          中文说明（本文件）
 README.en.md                       English README (independent, same content)
@@ -287,6 +288,29 @@ evidence/native-*.log              成功那轮的 native 日志（boot_ms=40663
 - 失败表现为内核 panic → 设备自行重启恢复（数据不丢），脚本会等它回来继续。
 - **临时 root**：`late-load` 只在内存里，硬重启即失效；软重启后 `vrpatch` 的文本补丁仍在。
 - 收尾 SELinux 仍是 **Enforcing**（靠 policy fixup + `ksu` 域），不是关掉 SELinux。
+
+## 清理 / 卸载
+
+这套东西的"痕迹"分两类，别只删文件：
+
+| 类别 | 内容 | 怎么清 |
+|---|---|---|
+| **内存态** | `kernelsu` late-load 模块、`vrpatch` 对 `vr.ko` 的 8 字节补丁、W1 改的 SELinux 状态 / `load_policy` 补丁、临时 cred | **reboot 即消失**，不需要删任何文件 |
+| **磁盘态** | `/data/local/tmp/ghostlock-app`（payload + 日志 + root 脚本）、测试目录、`/data/adb/ksud` + `/data/adb/ksu/*`（约 91 MB）、管理器 APK | 用 `clean.sh` 删 |
+
+```bash
+./clean.sh                       # dry-run：只列出会删什么 + 体积（默认行为）
+./clean.sh --yes                 # 删工作目录/测试目录 + 收掉残留的 exploit 进程
+./clean.sh --yes --ksu           # 再删 KSU 用户态（/data/adb/ksud、/data/adb/ksu/*）
+./clean.sh --yes --uninstall     # 再卸载管理器 com.resukisu.resukisu
+./clean.sh --yes --all --reboot  # 一步回到干净系统（推荐收尾）
+```
+
+**顺序有讲究**：趁 root 还在**先删文件**（`/data/local/tmp` 里有些日志是 root 属主，shell 删不掉），
+**再 reboot** 把内核态清掉（root 同时消失）。`clean.sh` 默认只列不动手，加 `--yes` 才真正删除。
+
+> 未经你确认，本项目不会自动执行任何删除；`--ksu` 会动到 KSU 用户态（其它 KSU 模块会受影响），
+> 所以它和 `--uninstall` 都是显式开关，默认不开。
 
 ## 10. 免责声明（Disclaimer）
 

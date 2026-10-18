@@ -50,4 +50,11 @@ adb shell su -c 'id'        # uid=0(root) context=u:r:ksu:s0
 注意：`late-load` 只在内存里，**重启就没了**，重启后再跑一次 `./reroot.sh` 即可；
 `vrpatch.ko` 的补丁在软重启后存活。
 
+收尾清理（默认只列不动手）：
+
+```bash
+./clean.sh                          # 看清单
+./clean.sh --yes --all --reboot     # 真清 + 重启（内核态随之清空）
+```
+
 细节见 `README.md`、`docs/PORTING.md`（§8 实战、§9 与作者帖子核对）、`scripts/README.md`。
