@@ -74,6 +74,17 @@ Common flags (`reroot.sh`):
 ./reroot.sh 20               # up to 20 rounds
 ```
 
+**All-in-one** (list ko -> you pick -> escalate -> clean residue on success -> exit):
+
+```bash
+./reroot.sh --ko 1 --clean-after
+```
+
+- the local `.ko` files are listed first (omit `--ko` to pick interactively; Enter = use the manager's own)
+- picking a ko is local-only and does **not** affect the boot window (the push happens before the wait)
+- on success it removes this run's residue but keeps `user.ko` and the `ksud` wrapper, so the next run
+  still uses your ko
+
 ## 5. Switching / installing a KSU manager
 
 The manager's uapi must **match** the kernel module's uapi, otherwise the home screen only says

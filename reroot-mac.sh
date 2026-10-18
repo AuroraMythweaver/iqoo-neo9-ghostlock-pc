@@ -20,6 +20,8 @@
 #     ./reroot-mac.sh --check-payload # 只看设备上的 payload 是否就绪
 #     ./reroot-mac.sh --redeploy      # 强制重推 payload
 #     ./reroot-mac.sh --force         # release 不匹配也打（可能 panic，慎用）
+#     ./reroot-mac.sh --ko 1          # 启动时选本目录第 1 个 .ko（late-load 时先加载它）
+#     ./reroot-mac.sh --ko 1 --clean-after   # 成功后自动清理本次残留（保留 user.ko / wrapper）
 # ============================================================================
 set -u
 
@@ -38,9 +40,12 @@ DEPLOY_ONLY=0
 CHECK_PAYLOAD=0
 REDEPLOY=0
 FORCE=0
+KO_SEL=""
+KO_FILE=""
+CLEAN_AFTER=0
 
-for a in "$@"; do
-  case "$a" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --no-reboot) : ;;   # 兼容旧参数：现在本来就不主动重启
     --check)     CHECK_ONLY=1 ;;
     --inspect)   INSPECT=1 ;;
@@ -48,17 +53,15 @@ for a in "$@"; do
     --deploy)    DEPLOY_ONLY=1 ;;
     --check-payload) CHECK_PAYLOAD=1 ;;
     --force)     FORCE=1 ;;
-    --pack)      shift ;;
-    *.bin)       PACK="$a" ;;
+    --ko)        KO_SEL="${2:-}"; [ -n "$KO_SEL" ] && shift ;;
+    --no-ko)     KO_SEL=none ;;
+    --clean-after) CLEAN_AFTER=1 ;;
+    --pack)      shift; PACK="${1:-$PACK}" ;;
+    *.bin)       PACK="$1" ;;
     ''|*[!0-9]*) ;;
-    *)           ROUNDS="$a" ;;
+    *)           ROUNDS="$1" ;;
   esac
-done
-# --pack <path> 形式
-prev=""
-for a in "$@"; do
-  [ "$prev" = "--pack" ] && PACK="$a"
-  prev="$a"
+  shift
 done
 
 say() { printf '%s\n' "$*"; }
@@ -179,6 +182,57 @@ wait_cycle() {   # 等设备自己重启（掉线再回来）；超时返回 1
   return 0
 }
 
+select_ko() {   # 结果写进 KO_FILE；没有/跳过返回 1
+  local list=() f i n
+  while IFS= read -r f; do list+=("$f"); done < <(find "$HERE" -maxdepth 1 -type f -name '*.ko' | sort)
+  [ "${#list[@]}" -gt 0 ] || { say "[i] 本目录没有 .ko —— 用管理器自带的 ko"; return 1; }
+  say ""
+  say "[本目录的 ko]"
+  i=0; for f in "${list[@]}"; do i=$((i+1)); say "  $i) $(basename "$f")  $(wc -c <"$f") B"; done
+  [ "$KO_SEL" = none ] && { say "[i] --no-ko：跳过"; return 1; }
+  if [ -n "$KO_SEL" ]; then
+    case "$KO_SEL" in
+      [0-9]*) i=$((KO_SEL-1)); [ "$i" -ge 0 ] && [ "$i" -lt "${#list[@]}" ] && { KO_FILE="${list[$i]}"; return 0; } ;;
+      *)      for f in "${list[@]}"; do [ "$(basename "$f")" = "$KO_SEL" ] && { KO_FILE="$f"; return 0; }; done ;;
+    esac
+    say "[!] --ko $KO_SEL 无效"; return 1
+  fi
+  [ -t 0 ] || { say "[i] 非交互模式，跳过（--ko N 可指定）"; return 1; }
+  printf '选哪个 ko？（回车 = 用管理器自带的）: '
+  read -r n || return 1
+  case "$n" in
+    '') return 1 ;;
+    [0-9]*) i=$((n-1)); [ "$i" -ge 0 ] && [ "$i" -lt "${#list[@]}" ] && { KO_FILE="${list[$i]}"; return 0; } ;;
+  esac
+  say "[!] 编号无效"; return 1
+}
+
+install_user_ko() {   # 布置：user.ko + ksud wrapper（让 root 脚本 late-load 时先加载你的 ko）
+  [ -n "$KO_FILE" ] || return 0
+  say "[*] 指定 ko：$(basename "$KO_FILE")"
+  adb push "$KO_FILE" "$D/user.ko" >/dev/null 2>&1 || die "push ko 失败"
+  adb shell "chmod 644 $D/user.ko" >/dev/null 2>&1
+  REAL="$(sho "ls -d /data/app/*/*/lib/arm64/libksud.so 2>/dev/null | head -1")"
+  W="$(mktemp)"; cat > "$W" <<EOS
+#!/system/bin/sh
+KO='$D/user.ko'
+REAL=""
+for R in '$REAL' /data/adb/ksu/bin/ksud /data/adb/ksud /data/local/tmp/ksud; do
+  [ -x "\$R" ] && { REAL="\$R"; break; }
+done
+[ -n "\$REAL" ] || exit 90
+if [ "\$1" = "late-load" ]; then
+  shift
+  [ -f "\$KO" ] && "\$REAL" insmod "\$KO" allow_shell=1 >/dev/null 2>&1
+  exec "\$REAL" late-load "\$@"
+fi
+exec "\$REAL" "\$@"
+EOS
+  adb push "$W" "$D/ksud" >/dev/null 2>&1 || { rm -f "$W"; die "push wrapper 失败"; }
+  rm -f "$W"
+  adb shell "chmod 755 $D/ksud; rm -f $D/.gl_ksu_pkg" >/dev/null 2>&1
+}
+
 gen_glrun() {  # gen_glrun <dest>
   cat > "$1" <<EOS
 #!/system/bin/sh
@@ -273,6 +327,7 @@ if [ "$CHECK_ONLY" = 1 ]; then
 fi
 
 need_deploy && deploy
+select_ko && install_user_ko
 
 say "[i] 最多 $ROUNDS 轮；脚本不会主动重启设备"
 
@@ -359,8 +414,18 @@ if [ "$WIN" = 1 ] || is_root; then
   show_status
   say ""
   say "用法：  adb shell su -c 'id'"
-  say "注意：  late-load 只在内存里 —— 硬重启就没了，重启后重跑本脚本；"
-  say "        vrpatch.ko 的补丁在软重启后存活。"
+  say "注意：  late-load 只在内存里 —— 硬重启就没了，重启后重跑本脚本。"
+  if [ -n "$KO_FILE" ]; then
+    say "        （本次用的是你的 ko：$(basename "$KO_FILE")，已写入 $D/user.ko，下次仍会用它）"
+  fi
+  if [ "$CLEAN_AFTER" = 1 ] && [ "$WIN" = 1 ]; then
+    say ""
+    say "[*] 清理本次提权残留（保留 user.ko 与 ksud wrapper）"
+    adb shell "rm -f $D/libghostlock.so $D/profile.bin $D/vrpatch.ko $D/glrun.sh \
+      $D/.ghostlock_root.sh $D/.ghostlock_iomem $D/.gl_out $D/.gl_cmd \
+      $D/native-*.log $D/native-*.rc $D/ksu-*.log" >/dev/null 2>&1 || true
+    say "    ok（payload 与日志已删；root 与 KSU 不受影响）"
+  fi
   exit 0
 else
   say "[-] 这轮没中。再跑一次（概率问题；作者单轮约 43 秒，也是多轮才稳）。"
