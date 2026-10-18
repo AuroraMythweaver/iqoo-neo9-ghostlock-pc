@@ -74,15 +74,12 @@ char *gl_expected_release(const gl_pack *p, const gl_opt *o)
     if (e) {
         gl_buf b;
         gl_buf_init(&b);
-        char *tmp = xasprintf("/tmp/glrel.%ld", (long)getpid());
-        if (gl_pack_extract(p, e, tmp) == 0 && read_file(tmp, &b) == 0) {
-            unlink(tmp);
+        if (gl_pack_read(p, e, &b) == 0) {
             char *s = str_trim(b.p ? b.p : "");
             char *out = xstrdup(s);
             gl_buf_free(&b);
             return out;
         }
-        unlink(tmp);
         gl_buf_free(&b);
     }
     return NULL;
@@ -221,7 +218,16 @@ int gl_do_deploy(const gl_adb *a, const gl_pack *p)
         free(release);
         goto out;
     }
-    if (release && !str_eq(release, dev_rel)) {
+    if (!release) {
+        /* No release to compare is not the same as a match: refuse by default. */
+        msg_warn("无法确定 payload 的 release（没有 release.txt，blob 也解析失败）");
+        if (!g_opt.force) {
+            msg_warn("拒绝执行。确认包没问题再加 --force。");
+            free(dev_rel);
+            goto out;
+        }
+        msg_warn("--force：跳过 release 检查，风险自担");
+    } else if (!str_eq(release, dev_rel)) {
         msg_warn("release 不匹配：");
         say("    设备 uname -r : %s", dev_rel);
         say("    包内 release  : %s", release);
@@ -263,6 +269,22 @@ int gl_do_deploy(const gl_adb *a, const gl_pack *p)
     o = gl_adb_sh_out(a, cmd, 20000);
     free(cmd);
     free(o);
+
+    /* root 脚本读取的两个提示文件（App 写错位置的那个坑，PC 侧写对） */
+    if (g_opt.ksu_pkg) {
+        cmd = xasprintf("printf '%%s' '%s' > %s/.gl_ksu_pkg", g_opt.ksu_pkg,
+                        g_opt.dev_dir);
+        o = gl_adb_sh_out(a, cmd, 10000);
+        free(cmd);
+        free(o);
+    }
+    if (g_opt.kmi) {
+        cmd = xasprintf("printf '%%s' '%s' > %s/.gl_kmi", g_opt.kmi,
+                        g_opt.dev_dir);
+        o = gl_adb_sh_out(a, cmd, 10000);
+        free(cmd);
+        free(o);
+    }
 
     msg_step("部署完成（release=%s）", release ? release : "?");
     rc = 0;

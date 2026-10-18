@@ -108,6 +108,8 @@ def launch(cmd):
     write_file(ksu, "[*] root script start uid=0 euid=0\n")
     write_file(os.path.join(STATE, "run-%s.cnt" % ts), "0")
     write_file(os.path.join(STATE, "run-%s.ts" % ts), ts)
+    with open(os.path.join(STATE, "launches"), "a") as lf:
+        lf.write("1\n")
     emitln("go")
     return True
 
@@ -130,10 +132,14 @@ def advance(ts):
             f.write("[*] Loaded kernel module: %s/vrpatch.ko  (exit=0)\n" % DEV)
             f.write("[*] late-load pkg=com.resukisu.resukisu kmi=android13-5.15 (exit=0)\n")
     if n == 3:
-        with open(ksu, "a") as f:
-            f.write("[+] KernelSU module loaded\n[*] script done\n")
-        set_state("root", "1")
-        set_state("ksu", "1")
+        if os.environ.get("MOCK_NO_KSU") == "1":
+            with open(ksu, "a") as f:
+                f.write("[*] late-load failed: KernelSU module not loaded\n")
+        else:
+            with open(ksu, "a") as f:
+                f.write("[+] KernelSU module loaded\n[*] script done\n")
+            set_state("root", "1")
+            set_state("ksu", "1")
     if n == 4:
         write_file(os.path.join(d, "native-%s.rc" % ts), "done\n")
 

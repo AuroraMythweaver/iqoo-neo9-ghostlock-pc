@@ -153,6 +153,14 @@ check "status root YES after" "grep -q 'root      : YES' '$OUT.status1'"
 "$BIN" run --pack "$PACK" --rounds 1 > "$OUT.run2" 2>&1
 check "run is idempotent"     "grep -q '已经是 root' '$OUT.run2'"
 
+echo "== no refire after root progress =="
+MOCK_NO_KSU=1 MOCK_STATE="$TMP/state-nk" "$BIN" run --pack "$PACK" --rounds 1 \
+  --per-boot 3 --timeout 15 --poll 150 --handoff-wait 2 --cycle-wait 1 \
+  > "$OUT.nk" 2>&1
+check "no-refire exits 1"     "[ $? -eq 1 ]"
+check "no-refire explains"    "grep -q '不再发射' '$OUT.nk'"
+check "exactly one launch"    "[ \$(wc -l < '$TMP/state-nk/launches') -eq 1 ]"
+
 echo "== root terminal / logs =="
 "$BIN" exec -- id -u > "$OUT.exec" 2>&1
 check "exec returns root"     "grep -q 'uid=0(root)' '$OUT.exec'"

@@ -117,7 +117,9 @@ int gl_exec(char *const argv[], int timeout_ms,
             ssize_t n = read(po[0], tmp, sizeof tmp);
             if (n > 0) {
                 if (out) gl_buf_add(out, tmp, (size_t)n);
-            } else if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
+            } else if (n == 0) {
+                eof_o = true;
+            } else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
                 eof_o = true;
             }
         }
@@ -126,7 +128,9 @@ int gl_exec(char *const argv[], int timeout_ms,
             ssize_t n = read(pe[0], tmp, sizeof tmp);
             if (n > 0) {
                 if (err) gl_buf_add(err, tmp, (size_t)n);
-            } else if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
+            } else if (n == 0) {
+                eof_e = true;
+            } else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
                 eof_e = true;
             }
         }
@@ -142,10 +146,22 @@ int gl_exec(char *const argv[], int timeout_ms,
     close(pe[0]);
 
     int status = 0;
+    if (timed_out) {
+        /* SIGKILL cannot retire a D-state child; never block forever here. */
+        int waited = 0;
+        for (;;) {
+            pid_t w = waitpid(pid, &status, WNOHANG);
+            if (w == pid) break;
+            if (w < 0 && errno != EINTR) break;
+            if (waited >= 5000) break;
+            msleep(20);
+            waited += 20;
+        }
+        return -1;
+    }
     while (waitpid(pid, &status, 0) < 0) {
         if (errno != EINTR) break;
     }
-    if (timed_out) return -1;
     if (exit_code) {
         if (WIFEXITED(status)) *exit_code = WEXITSTATUS(status);
         else if (WIFSIGNALED(status)) *exit_code = 128 + WTERMSIG(status);

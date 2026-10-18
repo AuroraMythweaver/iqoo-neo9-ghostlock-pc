@@ -14,6 +14,18 @@
 
 gl_opt g_opt;
 
+/* The default pack path and the resolved adb path are heap-owned; free them on
+ * exit so a leak checker sees a clean process. (--pack / --serial point into
+ * argv and are not owned.) */
+static char *owned_pack;
+
+static void cleanup_globals(void)
+{
+    free(owned_pack);
+    free((void *)g_opt.adb_bin);
+    /* g_opt.serial is owned (and freed) by the command that resolves it. */
+}
+
 /* dev_dir is embedded in device-side shell strings, so keep it boring. */
 static bool valid_dev_dir(const char *s)
 {
@@ -25,6 +37,30 @@ static bool valid_dev_dir(const char *s)
                   c == '-';
         if (!ok) return false;
     }
+    return true;
+}
+
+/* Values that end up inside device-side shell strings (quoted or not) must be
+ * boring: letters, digits, dot, underscore, dash. */
+static bool valid_token(const char *s)
+{
+    if (!s || !*s || strlen(s) > 64) return false;
+    for (const char *p = s; *p; p++) {
+        char c = *p;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-'))
+            return false;
+    }
+    return true;
+}
+
+static bool valid_int_str(const char *s)
+{
+    if (!s || !*s || strlen(s) > 12) return false;
+    if (*s == '-') s++;
+    if (!*s) return false;
+    for (; *s; s++)
+        if (*s < '0' || *s > '9') return false;
     return true;
 }
 
@@ -93,6 +129,7 @@ static void usage(FILE *f)
         "  --window N           uptime 超过 N 秒就不再刷（默认 %d）\n"
         "  --timeout N          单次观察最长秒数（默认 %d）\n"
         "  --cycle-wait N       等设备自己重启的最长秒数（默认 %d）\n"
+        "  --handoff-wait N     root 脚本启动后继续观察的秒数（默认 %d）\n"
         "  --poll MS            日志轮询间隔毫秒（默认 %d）\n"
         "  --force              release 不匹配也打（可能 panic，慎用）\n"
         "  --force-attack       传给 native 的 --force-attack（默认开）\n"
@@ -110,9 +147,9 @@ static void usage(FILE *f)
         "clean:  --yes 执行 | --ksu /data/adb 用户态 | --uninstall 卸载管理器 | --all | --reboot\n"
         "install: --ko N | --install N | --ksud PATH | --pkg PKG | --persist | --dry-run | --yes\n"
         "\n"
-        "环境变量: ADB, GL_DIR, TIMEOUT, PER_BOOT, WINDOW, CYCLE_WAIT\n",
+        "环境变量: ADB, GL_DIR, TIMEOUT, PER_BOOT, WINDOW, CYCLE_WAIT, GL_HANDOFF_WAIT\n",
         GL_VERSION, GL_DEFAULT_DIR, g_opt.per_boot, g_opt.window, g_opt.timeout,
-        g_opt.cycle_wait, g_opt.poll_ms);
+        g_opt.cycle_wait, g_opt.handoff_wait, g_opt.poll_ms);
 }
 
 static bool is_subcommand(const char *s)
@@ -130,8 +167,10 @@ static bool is_subcommand(const char *s)
 int main(int argc, char **argv)
 {
     memset(&g_opt, 0, sizeof g_opt);
+    atexit(cleanup_globals);
     g_opt.adb_bin = find_adb();
-    g_opt.pack = resolve_pack();
+    owned_pack = resolve_pack();
+    g_opt.pack = owned_pack;
     g_opt.dev_dir = getenv("GL_DIR") && *getenv("GL_DIR") ? getenv("GL_DIR")
                                                            : GL_DEFAULT_DIR;
     g_opt.rounds = 10;
@@ -139,6 +178,7 @@ int main(int argc, char **argv)
     g_opt.window = env_int("WINDOW", 90);
     g_opt.timeout = env_int("TIMEOUT", 180);
     g_opt.cycle_wait = env_int("CYCLE_WAIT", 600);
+    g_opt.handoff_wait = env_int("GL_HANDOFF_WAIT", 120);
     g_opt.poll_ms = 700;
     g_opt.force_attack = true;
     g_opt.ko_sel = NULL;
@@ -232,6 +272,9 @@ int main(int argc, char **argv)
         } else if (str_eq(s, "--cycle-wait")) {
             NEEDVAL();
             g_opt.cycle_wait = atoi(v);
+        } else if (str_eq(s, "--handoff-wait")) {
+            NEEDVAL();
+            g_opt.handoff_wait = atoi(v);
         } else if (str_eq(s, "--poll")) {
             NEEDVAL();
             g_opt.poll_ms = atoi(v);
@@ -297,12 +340,40 @@ int main(int argc, char **argv)
     if (!valid_dev_dir(g_opt.dev_dir))
         die("--dir 只支持 [A-Za-z0-9._/-] 的绝对路径：%s", g_opt.dev_dir);
 
+    if (g_opt.profile_file && !valid_token(g_opt.profile_file))
+        die("--profile-file 只支持 [A-Za-z0-9._-]：%s", g_opt.profile_file);
+    if (g_opt.ksu_pkg && !valid_token(g_opt.ksu_pkg))
+        die("--ksu-pkg 只支持 [A-Za-z0-9._-]：%s", g_opt.ksu_pkg);
+    if (g_opt.kmi && !valid_token(g_opt.kmi))
+        die("--kmi 只支持 [A-Za-z0-9._-]：%s", g_opt.kmi);
+    if (g_opt.main_cpu && !valid_int_str(g_opt.main_cpu))
+        die("--main-cpu 必须是整数：%s", g_opt.main_cpu);
+    if (g_opt.consumer_cpu && !valid_int_str(g_opt.consumer_cpu))
+        die("--consumer-cpu 必须是整数：%s", g_opt.consumer_cpu);
+    if (g_opt.ksu_enforce && !valid_int_str(g_opt.ksu_enforce))
+        die("--ksu-enforce 必须是整数：%s", g_opt.ksu_enforce);
+    if (g_opt.vr_tag_b && !valid_int_str(g_opt.vr_tag_b))
+        die("--vr-tag-b 必须是整数：%s", g_opt.vr_tag_b);
+    if (g_opt.dump_kernel_log && !valid_dev_dir(g_opt.dump_kernel_log))
+        die("--dump-kernel-log 只支持 [A-Za-z0-9._/-] 的绝对路径：%s",
+            g_opt.dump_kernel_log);
+
     if (g_opt.rounds < 1) g_opt.rounds = 1;
     if (g_opt.per_boot < 1) g_opt.per_boot = 1;
     if (g_opt.timeout < 5) g_opt.timeout = 5;
     if (g_opt.poll_ms < 100) g_opt.poll_ms = 100;
+    if (g_opt.window < 1) g_opt.window = 1;
+    if (g_opt.cycle_wait < 1) g_opt.cycle_wait = 1;
+    if (g_opt.handoff_wait < 1) g_opt.handoff_wait = 1;
 
-    if (!cmd) cmd = "run";
+    if (!cmd) {
+        /* install-only flags must never silently fall through to `run` and
+         * start an exploit race while the user thinks they are installing. */
+        if (g_opt.apk_sel || g_opt.ksud_path || g_opt.persist || g_opt.dry_run)
+            cmd = "install";
+        else
+            cmd = "run";
+    }
 
     if (str_eq(cmd, "help")) {
         usage(stdout);

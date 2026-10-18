@@ -38,6 +38,16 @@ static char *dev_as_root(const gl_adb *a, bool is_root, const char *cmd)
 
 int cmd_clean(void)
 {
+    /* Deletion is the one irreversible thing this tool does. Only ever remove
+     * the working directory inside /data/local/tmp: --dir /data must not be
+     * able to turn into `rm -rf /data` as root. */
+    static const char tmp_root[] = "/data/local/tmp/";
+    if (!str_starts(g_opt.dev_dir, tmp_root) ||
+        strlen(g_opt.dev_dir) <= sizeof tmp_root - 1 ||
+        g_opt.dev_dir[strlen(g_opt.dev_dir) - 1] == '/')
+        die("clean 只清 %s 下的工作目录（收到：%s）", "/data/local/tmp/<dir>",
+            g_opt.dev_dir);
+
     char *serial = gl_env_serial();
     gl_adb a2 = {g_opt.adb_bin, serial};
 

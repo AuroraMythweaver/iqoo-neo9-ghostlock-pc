@@ -138,6 +138,7 @@ int gl_pack_open(const char *path, gl_pack *p);
 void gl_pack_close(gl_pack *p);
 const gl_pack_entry *gl_pack_find(const gl_pack *p, const char *name);
 int gl_pack_extract(const gl_pack *p, const gl_pack_entry *e, const char *dest);
+int gl_pack_read(const gl_pack *p, const gl_pack_entry *e, gl_buf *out);
 
 /* ---------------------------------------------------------------- profile */
 
@@ -188,6 +189,7 @@ typedef struct {
     int window;
     int timeout;
     int cycle_wait;
+    int handoff_wait;   /* seconds to keep observing after the root script starts */
     int poll_ms;
 
     bool force;          /* allow a release mismatch (release gate) */

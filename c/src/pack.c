@@ -38,49 +38,51 @@ static uint32_t rd_u32(const unsigned char *p)
 
 int gl_pack_open(const char *path, gl_pack *p)
 {
+    FILE *f = NULL;
     memset(p, 0, sizeof *p);
     p->path = xstrdup(path);
 
     int64_t sz = 0;
     if (file_size(path, &sz) != 0) {
         fprintf(stderr, "[!] 找不到 payload 包：%s\n", path);
-        return -1;
+        goto fail;
     }
     p->file_size = (uint64_t)sz;
     if (p->file_size < GL_PACK_HDR + 1) {
         fprintf(stderr, "[!] 文件太小，不是 GLPACK 包：%s\n", path);
-        return -1;
+        goto fail;
     }
 
-    FILE *f = fopen(path, "rb");
+    f = fopen(path, "rb");
     if (!f) {
         fprintf(stderr, "[!] 打不开 %s: %s\n", path, strerror(errno));
-        return -1;
+        goto fail;
     }
     unsigned char hdr[GL_PACK_HDR];
     if (fread(hdr, 1, sizeof hdr, f) != sizeof hdr) {
-        fclose(f);
         fprintf(stderr, "[!] 读包头失败：%s\n", path);
-        return -1;
+        goto fail;
     }
     if (memcmp(hdr, GL_PACK_MAGIC, 8) != 0) {
-        fclose(f);
         fprintf(stderr, "[!] 不是 GLPACK 包（magic 不是 GLPACK01）：%s\n", path);
-        return -1;
+        goto fail;
     }
     p->data_start = rd_u64(hdr + 8);
     p->n_entries = rd_u32(hdr + 16);
     p->format = rd_u32(hdr + 20);
 
+    if (p->format != 1) {
+        fprintf(stderr, "[!] 不支持的包格式 version=%u（只认 1）\n", p->format);
+        goto fail;
+    }
     if (p->n_entries > 4096 ||
         p->data_start > p->file_size ||
         (uint64_t)GL_PACK_HDR + (uint64_t)p->n_entries * GL_PACK_ENT >
             p->data_start) {
-        fclose(f);
         fprintf(stderr, "[!] 包头自相矛盾（n=%u data_start=%llu size=%llu）\n",
                 p->n_entries, (unsigned long long)p->data_start,
                 (unsigned long long)p->file_size);
-        return -1;
+        goto fail;
     }
 
     p->entries = xcalloc(p->n_entries ? p->n_entries : 1, sizeof *p->entries);
@@ -88,10 +90,8 @@ int gl_pack_open(const char *path, gl_pack *p)
         unsigned char ent[GL_PACK_ENT];
         if (fseek(f, (long)(GL_PACK_HDR + (uint64_t)i * GL_PACK_ENT), SEEK_SET) != 0 ||
             fread(ent, 1, sizeof ent, f) != sizeof ent) {
-            fclose(f);
             fprintf(stderr, "[!] 读条目表失败（第 %u 项）\n", i);
-            gl_pack_close(p);
-            return -1;
+            goto fail;
         }
         gl_pack_entry *e = &p->entries[i];
         e->off = rd_u64(ent);
@@ -101,15 +101,18 @@ int gl_pack_open(const char *path, gl_pack *p)
         if (e->off > p->file_size || e->size > p->file_size ||
             p->data_start + e->off > p->file_size ||
             e->size > p->file_size - (p->data_start + e->off)) {
-            fclose(f);
             fprintf(stderr, "[!] 条目越界：%s off=%llu size=%llu\n", e->name,
                     (unsigned long long)e->off, (unsigned long long)e->size);
-            gl_pack_close(p);
-            return -1;
+            goto fail;
         }
     }
     fclose(f);
     return 0;
+
+fail:
+    if (f) fclose(f);
+    gl_pack_close(p);
+    return -1;
 }
 
 void gl_pack_close(gl_pack *p)
@@ -125,6 +128,31 @@ const gl_pack_entry *gl_pack_find(const gl_pack *p, const char *name)
     for (uint32_t i = 0; i < p->n_entries; i++)
         if (str_eq(p->entries[i].name, name)) return &p->entries[i];
     return NULL;
+}
+
+int gl_pack_read(const gl_pack *p, const gl_pack_entry *e, gl_buf *out)
+{
+    FILE *in = fopen(p->path, "rb");
+    if (!in) return -1;
+    if (fseek(in, (long)(p->data_start + e->off), SEEK_SET) != 0) {
+        fclose(in);
+        return -1;
+    }
+    unsigned char tmp[65536];
+    uint64_t left = e->size;
+    int rc = 0;
+    while (left) {
+        size_t want = left > sizeof tmp ? sizeof tmp : (size_t)left;
+        size_t got = fread(tmp, 1, want, in);
+        if (got == 0) {
+            rc = -1;
+            break;
+        }
+        gl_buf_add(out, tmp, got);
+        left -= got;
+    }
+    fclose(in);
+    return rc;
 }
 
 int gl_pack_extract(const gl_pack *p, const gl_pack_entry *e, const char *dest)

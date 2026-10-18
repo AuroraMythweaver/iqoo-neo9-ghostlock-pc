@@ -188,7 +188,7 @@ static attempt_res observe(const gl_adb *a, const char *dev_dir, const char *ts,
         if (buf_has(&kbuf, "root script start") && !res.handoff) {
             res.handoff = true;
             msg_info("root 脚本已启动（uid0），等它做完 policy/vrpatch/late-load，不再发射");
-            deadline = now_ms() + 120000;
+            deadline = now_ms() + (int64_t)g_opt.handoff_wait * 1000;
             continue;
         }
 
@@ -206,6 +206,26 @@ static attempt_res observe(const gl_adb *a, const char *dev_dir, const char *ts,
                 gl_buf_add(&buf, tail.p, tail.len);
             }
             gl_buf_free(&tail);
+            /* the script may have loaded KSU between our last ksu read and the
+             * .rc file appearing — re-read and re-test before declaring a miss */
+            gl_buf kfinal;
+            gl_buf_init(&kfinal);
+            if (log_chunk(a, ksup, &koff, &kfinal)) {
+                gl_buf_add(&kbuf, kfinal.p, kfinal.len);
+                fputs("[ksu] ", stdout);
+                fwrite(kfinal.p, 1, kfinal.len, stdout);
+                fflush(stdout);
+            }
+            gl_buf_free(&kfinal);
+            if (buf_has(&kbuf, "KernelSU module loaded") ||
+                buf_has(&buf, "KernelSU module loaded")) {
+                res.win = true;
+                msg_ok("KSU late-load 成功");
+            }
+            if (buf_has(&kbuf, "root script start")) res.handoff = true;
+            for (int i = 0; MARKERS_OK[i]; i++)
+                if (buf_has(&buf, MARKERS_OK[i]) || buf_has(&kbuf, MARKERS_OK[i]))
+                    res.soft = true;
             break;
         }
     }
@@ -244,7 +264,11 @@ static bool wait_cycle(const gl_adb *a)
         return false;
     }
     msg_info("设备掉线，等它回来…");
-    return gl_wait_shell(a, 300000);
+    if (!gl_wait_shell(a, 300000)) return false;
+    /* two consecutive good pings: a flaky adb moment is not a reboot */
+    if (!gl_device_alive(a)) return false;
+    msleep(1000);
+    return gl_device_alive(a);
 }
 
 static int launch_attempt(const gl_adb *a, const char *ts)
@@ -268,12 +292,15 @@ static void clean_after(const gl_adb *a)
 {
     msg_step("清理本次提权残留（保留 user.ko 与 ksud wrapper）");
     char *cmd = xasprintf(
-        "rm -f %s/libghostlock.so %s/profile.bin %s/vrpatch.ko %s/%s "
+        "rm -f %s/libghostlock.so %s/%s %s/vrpatch.ko %s/%s "
+        "%s/profile.len %s/incoming.ko %s/.last_ts "
         "%s/.ghostlock_root.sh %s/.ghostlock_iomem %s/.gl_out %s/.gl_cmd "
         "%s/native-*.log %s/native-*.rc %s/ksu-*.log",
+        g_opt.dev_dir, g_opt.dev_dir, gl_opt_profile_name(&g_opt),
+        g_opt.dev_dir, g_opt.dev_dir, GL_DEV_RUNNER, g_opt.dev_dir,
         g_opt.dev_dir, g_opt.dev_dir, g_opt.dev_dir, g_opt.dev_dir,
-        GL_DEV_RUNNER, g_opt.dev_dir, g_opt.dev_dir, g_opt.dev_dir,
-        g_opt.dev_dir, g_opt.dev_dir, g_opt.dev_dir, g_opt.dev_dir);
+        g_opt.dev_dir, g_opt.dev_dir, g_opt.dev_dir, g_opt.dev_dir,
+        g_opt.dev_dir);
     char *out = gl_adb_sh_out(a, cmd, 20000);
     free(out);
     free(cmd);
@@ -306,6 +333,36 @@ int cmd_run(void)
         msg_info("payload 已就绪（大小与包内一致）");
     }
 
+    /* An OTA can change uname -r while the staged payload stays byte-identical:
+     * the size-only check above would happily launch with a stale profile. */
+    {
+        char *want = gl_expected_release(&p, &g_opt);
+        char *dev_rel = gl_adb_sh_out(&a, "uname -r", 10000);
+        if (!want) {
+            msg_warn("无法确定 payload 的 release（blob/release.txt 都读不出）");
+            if (!g_opt.force) {
+                msg_warn("拒绝执行。确认包没问题再加 --force。");
+                free(dev_rel);
+                free(serial);
+                gl_pack_close(&p);
+                return 2;
+            }
+        } else if (!dev_rel || !str_eq(want, dev_rel)) {
+            msg_warn("release 不匹配：设备 %s / payload %s", dev_rel ? dev_rel : "?",
+                     want);
+            if (!g_opt.force) {
+                msg_warn("拒绝执行。确认包是对的再加 --force。");
+                free(want);
+                free(dev_rel);
+                free(serial);
+                gl_pack_close(&p);
+                return 2;
+            }
+        }
+        free(want);
+        free(dev_rel);
+    }
+
     char *ko = NULL;
     if (gl_select_ko(&g_opt, &ko) == 0)
         gl_install_ko_wrapper(&a, &g_opt, ko);
@@ -336,7 +393,7 @@ int cmd_run(void)
         }
         msg_info("拿到 shell：uptime=%.1fs（越早越好）", upok ? up : -1.0);
 
-        bool dropped = false, handoff = false;
+        bool dropped = false, progressed = false;
         for (int n = 1; n <= g_opt.per_boot; n++) {
             up = gl_uptime(&a, &upok);
             if (upok && up > g_opt.window) {
@@ -370,27 +427,40 @@ int cmd_run(void)
                 win = true;
                 break;
             }
-            if (res.handoff) handoff = true;
+            if (res.handoff || res.soft) {
+                /* Root progress was observed (root script started, or the
+                 * native side already said "child is root"). Firing another
+                 * exploit here is precisely the mistake that destroyed a root
+                 * in the field notes: stop for this boot, even if the device
+                 * also looked unreachable at the end of this attempt. */
+                progressed = true;
+                break;
+            }
             if (res.dropped) {
                 dropped = true;
                 break;
             }
-            if (res.soft) {
-                /* Keep observing above; here it only means the attempt ended
-                 * without a hard success. */
-            }
         }
 
         if (win) break;
-        if (handoff) {
-            msg_warn("root 脚本起来了但没等到 KernelSU loaded");
+        if (progressed) {
+            msg_warn("已出现 root 进度（脚本已启动/已拿到 uid0）但没等到 KernelSU loaded");
+            msg_info("本轮不再发射（避免第二发把已拿到的 root 打崩）");
             if (wait_cycle(&a)) continue;
             break;
         }
         if (dropped) {
+            double pre = upok ? up : -1;
             msg_info("等设备回来…");
             if (!gl_wait_shell(&a, 300000)) {
                 msg_warn("设备没回来，退出");
+                break;
+            }
+            bool upok2 = false;
+            double nowup = gl_uptime(&a, &upok2);
+            if (pre >= 0 && upok2 && nowup > pre) {
+                msg_warn("设备没有重启（uptime %.0fs→%.0fs）：不重新发射，避免二次打崩",
+                         pre, nowup);
                 break;
             }
             continue;

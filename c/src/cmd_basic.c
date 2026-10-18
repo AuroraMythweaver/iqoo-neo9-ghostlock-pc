@@ -19,22 +19,14 @@ int cmd_inspect(void)
     for (uint32_t i = 0; i < p.n_entries; i++) {
         const gl_pack_entry *e = &p.entries[i];
         if (str_eq(e->name, "release.txt")) {
-            char tmpl[] = "/tmp/glrel.XXXXXX";
-            int fd = mkstemp(tmpl);
-            if (fd >= 0) {
-                close(fd);
-                if (gl_pack_extract(&p, e, tmpl) == 0) {
-                    gl_buf b;
-                    gl_buf_init(&b);
-                    if (read_file(tmpl, &b) == 0) {
-                        char *t = str_trim(b.p ? b.p : "");
-                        say("  %-18s %8llu B   %s", e->name,
-                            (unsigned long long)e->size, t);
-                    }
-                    gl_buf_free(&b);
-                }
-                unlink(tmpl);
+            gl_buf b;
+            gl_buf_init(&b);
+            if (gl_pack_read(&p, e, &b) == 0) {
+                char *t = str_trim(b.p ? b.p : "");
+                say("  %-18s %8llu B   %s", e->name,
+                    (unsigned long long)e->size, t);
             }
+            gl_buf_free(&b);
         } else {
             say("  %-18s %8llu B", e->name, (unsigned long long)e->size);
         }
@@ -99,7 +91,9 @@ int cmd_check(void)
 
     int rc = 0;
     char *profpath = xasprintf("%s/%s", g_opt.dev_dir, gl_opt_profile_name(&g_opt));
-    char *have = gl_adb_sh_out(&a2, xasprintf("test -f %s && echo yes", profpath), 10000);
+    char *havecmd = xasprintf("test -f %s && echo yes", profpath);
+    char *have = gl_adb_sh_out(&a2, havecmd, 10000);
+    free(havecmd);
     if (!have || !strstr(have, "yes")) {
         say("profile    : missing (run deploy)");
         rc = 1;
