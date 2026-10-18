@@ -211,6 +211,39 @@ adb uninstall com.resukisu.resukisu   # only if a differently-signed build is in
 adb install -r ReSukiSU_v4.2.0-rc3_35171-arm64-v8a-release.apk
 ```
 
+## After rooting: load your own .ko + install any KSU manager (`install-ksu.sh`)
+
+The stock APK loads `{kmi}_kernelsu.ko` **embedded in `libksud.so`** via `include_bytes!`
+(`late_load.rs:63`), so the ko follows the APK version. To supply your own (newer / better matched),
+use the same loader:
+
+```bash
+# put xxx_kernelsu.ko and the manager .apk next to the script, then (after a successful root):
+./install-ksu.sh                    # preview: list ko / apk / current kernel state
+./install-ksu.sh --ko 1             # load ko #1
+./install-ksu.sh --ko 1 --install 1 # load + install the manager
+./install-ksu.sh --persist --ko 1   # use this ko on every future reroot.sh (needs a reboot)
+```
+
+Mapping (source level):
+
+| Step | Stock APK | This script |
+|---|---|---|
+| ko source | embedded asset (`late_load.rs:63`) | **your plaintext `*.ko`** |
+| load API | `ksuinit::load_module` (`late_load.rs:86`) | `ksud insmod <file.ko> allow_shell=1` -> `debug.rs:76` calls the **same** `ksuinit::load_module` |
+| vermagic | loader rewrites it to the kernel-required value and retries | same |
+| userland bootstrap | rest of late-load (install ksud, modules, sepolicy, features) | run `ksud late-load` again (`has_kernelsu()` is true -> skips ko, does the bootstrap) |
+
+Caveats:
+
+- Only one `kernelsu` module can live in the kernel; changing the ko needs a reboot - the script tells
+  you to use `--persist` -> `adb reboot` -> `./reroot.sh`.
+- `--persist` writes a `$HOME_DIR/ksud` wrapper (the root script prefers it): on `late-load` it first
+  `insmod`s your ko, then execs the real ksud `late-load` for the bootstrap.
+- If a manager from the root-script's hardcoded candidate list is installed (e.g. `com.resukisu.resukisu`),
+  its `libksud.so` wins and the wrapper may be bypassed.
+- A failed load does not touch system partitions; check the `insmod` output.
+
 ## 5. Field results: this is a boot-window race
 
 Across all collected logs, `boot_ms` (milliseconds since boot when the native starts) correlates cleanly
@@ -286,6 +319,7 @@ python3 scripts/ghostlock_profile.py dump profile.bin
 ├── reroot.sh                 main script (Linux/WSL; never reboots, stops firing after handoff)
 ├── reroot-mac.sh             macOS variant (BSD dd / no timeout / no seq)
 ├── clean.sh                  cleanup / uninstall (dry-run by default)
+├── install-ksu.sh            load your own .ko after rooting + install any KSU manager
 ├── ghostlock.bin             payload pack (GLPACK01, format in §3)
 ├── README.md / README.en.md  docs (zh / en, each self-contained)
 ├── QUICKSTART.md             shortest usage

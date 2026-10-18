@@ -196,6 +196,35 @@ adb uninstall com.resukisu.resukisu   # 仅当已装过签名不同的版本
 adb install -r ReSukiSU_v4.2.0-rc3_35171-arm64-v8a-release.apk
 ```
 
+## 提权之后：装你自己的 ko + 换任意 KSU 管理器（`install-ksu.sh`）
+
+原 APK 做法：`ksud late-load` 用 **`libksud.so` 里 `include_bytes!` 内嵌的** `{kmi}_kernelsu.ko`，
+所以 ko 跟着 APK 版本走。想让 ko 由你提供（比 APK 里新/更匹配），用同一个加载器即可：
+
+```bash
+# 把 xxx_kernelsu.ko 和 管理器.apk 放到脚本同级目录，提权成功后：
+./install-ksu.sh                    # 预览：列 ko / apk / 当前内核状态
+./install-ksu.sh --ko 1             # 加载第 1 个 ko
+./install-ksu.sh --ko 1 --install 1 # 加载 + 装管理器
+./install-ksu.sh --persist --ko 1   # 以后每次 reroot.sh 都用这个 ko（需重启生效）
+```
+
+实现对应关系（源码级）：
+
+| 环节 | 原 APK | 本脚本 |
+|---|---|---|
+| ko 来源 | `assets` 内嵌（`late_load.rs:63` `assets::get_asset_data("{kmi}_kernelsu.ko")`） | **你的 `*.ko`**（明文文件） |
+| 加载 API | `ksuinit::load_module`（`late_load.rs:86`） | `ksud insmod <file.ko> allow_shell=1` → `debug.rs:76` 调**同一个** `ksuinit::load_module` |
+| vermagic | loader 自动替换内核要求值并重试 | 同左 |
+| 用户态 bootstrap | late-load 后半段（装 ksud、模块、sepolicy、features） | 再跑一次 `ksud late-load`（`has_kernelsu()` 为真 → 跳过 ko，只做 bootstrap） |
+
+注意：
+
+- 内核里**同一时刻只能有一个 `kernelsu`**；已加载时换 ko 必须重启，脚本会提示走 `--persist` → `adb reboot` → `./reroot.sh`。
+- `--persist` 写的是 `$HOME_DIR/ksud` wrapper（root 脚本优先用它）：`late-load` 时先 `insmod` 你的 ko，再 exec 真 ksud 的 `late-load` 做 bootstrap。
+- 若装了 root 脚本候选列表里的管理器（如 `com.resukisu.resukisu`），脚本会优先用它的 `libksud.so`，wrapper 可能被绕过。
+- 失败不会破坏系统分区，只是没加载上；看 `insmod` 输出。
+
 ## 5. 实测结论：这是个开机窗口竞争
 
 历史日志里 `boot_ms` 和结果的相关性非常干净（`boot_ms` = native 启动时距开机毫秒数）：
@@ -266,6 +295,7 @@ python3 scripts/ghostlock_profile.py dump profile.bin
 ├── reroot.sh                 主脚本（Linux/WSL；不主动重启、root 脚本起来后停火）
 ├── reroot-mac.sh             macOS 专用脚本（BSD dd / 无 timeout / 无 seq）
 ├── clean.sh                  清理 / 卸载（默认 dry-run）
+├── install-ksu.sh            提权后加载你自己的 .ko + 装任意 KSU 管理器
 ├── ghostlock.bin             payload 包（GLPACK01，格式见 §3）
 ├── README.md / README.en.md  说明（中/英，各自独立）
 ├── QUICKSTART.md             最短用法
