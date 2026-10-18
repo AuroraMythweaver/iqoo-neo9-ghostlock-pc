@@ -21,9 +21,13 @@
 本仓库根目录下只有两个文件要用：
 
 ```
-reroot.sh        脚本（纯 bash + adb）
+reroot.sh        脚本（Linux/WSL，纯 bash + adb）
+reroot-mac.sh    脚本（macOS 专用版，只依赖系统自带工具）
 ghostlock.bin    payload 包（libghostlock.so + vrpatch.ko + profile.bin）
 ```
+
+> **macOS 用 `./reroot-mac.sh`**：BSD `dd` 没有 `iflag=`、系统没有 `timeout`、默认 shell 是 zsh ——
+> `reroot.sh` 在这三点上会失败（报"包里没有 libghostlock.so"/状态全空），mac 版已经全部适配。
 
 ```bash
 git clone <this-repo> && cd <repo>

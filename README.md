@@ -115,6 +115,8 @@ session 里（`setsid` 脱离，PC 断开也不影响），可以无成本地一
 git clone <this-repo> && cd <repo>
 
 ./reroot.sh                  # 最多 10 轮：等手机进开机窗口 → 发射 → 命中即停（不主动重启）
+# macOS 用户用上面这个的 mac 变体（只依赖系统自带工具）：
+./reroot-mac.sh              # 同样的行为，BSD dd / 无 timeout / zsh 环境都适配
 ./reroot.sh 20               # 想多刷几轮
 ./reroot.sh --no-reboot      # 设备刚重启过 / 你手动重启完：直接抢窗口
 ./reroot.sh --check          # 只看当前有没有 root（不会重启）

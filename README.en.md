@@ -123,6 +123,8 @@ your firmware (the script compares `uname -r` and refuses on mismatch).
 git clone <this-repo> && cd <repo>
 
 ./reroot.sh                  # up to 10 rounds: wait for a boot window → fire → stop on success (never reboots)
+# macOS users: use the mac variant (system tools only)
+./reroot-mac.sh              # same behaviour; BSD dd / no `timeout` / zsh friendly
 ./reroot.sh 20               # more rounds
 ./reroot.sh --no-reboot      # device just rebooted / you rebooted it: race right away
 ./reroot.sh --check          # print status only (never reboots)
