@@ -1,5 +1,10 @@
 # ghostlock C CLI — 无 UI 的 PC 驱动（C11）
 
+> **分支定位（重要）**：这是开发中的备用实现，只存在于 `feat/c-cli` 子分支。
+> 还没有在真机验证，审计加固后的版本也还没重跑离线测试；
+> **成熟、验证通过、并经仓库所有者明确同意后**才考虑合并进 `main`。
+> `main` 目前仍然是 v1.1 的 bash 驱动（`reroot.sh` 等）。
+
 把 v1.1 的 bash 驱动（`reroot.sh` / `install-ksu.sh` / `clean.sh`）和
 `scripts/ghostlock_pc.py` 的能力，重写成**一个不依赖 Python 的单二进制**：
 `adb` 驱动、抢开机窗口、部署 payload、盯 root 脚本日志、命中即停。
