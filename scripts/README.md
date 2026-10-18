@@ -29,7 +29,8 @@ cd /home/qinghuan/SomeIDEA/app/ghostlock
 2. 从 `ghostlock.bin` 拆出 `libghostlock.so` / `vrpatch.ko` / `profile.bin`，
    与设备上的文件逐个比大小，不一致才推（`--redeploy` 强制重推）；
 3. 比对包里的 `release` 与设备 `uname -r`，不一致**直接拒绝**（`--force` 才硬打）；
-4. `adb reboot` → 死等 `adb shell` 可用 → **立刻发射**（窗口约 boot 后 12~45 秒）；
+4. 死等 `adb shell` 可用 → **立刻发射**（窗口约 boot 后 12~45 秒）；**脚本不主动重启**，
+   打崩/卡死时手机自己重启，脚本等它回来；
 5. 盯 root 脚本日志，出现 `KernelSU module loaded` 即成功并**立即停手**；
 6. 没中/panic 重启 → 自动等回来继续；窗口内还会连刷（`PER_BOOT` 次）。
 

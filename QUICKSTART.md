@@ -28,7 +28,7 @@ ghostlock.bin    payload 包（libghostlock.so + vrpatch.ko + profile.bin）
 ```bash
 git clone <this-repo> && cd <repo>
 
-./reroot.sh                  # 最多 10 轮：重启 → 抢开机窗口 → 命中即停
+./reroot.sh                  # 最多 10 轮：等开机窗口 → 发射 → 命中即停（脚本不主动重启）
 ./reroot.sh 20               # 多刷几轮
 ./reroot.sh --no-reboot      # 设备刚重启过 / 手动重启完：直接抢窗口
 ./reroot.sh --check          # 只看当前有没有 root（不会重启）

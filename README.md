@@ -114,7 +114,7 @@ session 里（`setsid` 脱离，PC 断开也不影响），可以无成本地一
 ```bash
 git clone <this-repo> && cd <repo>
 
-./reroot.sh                  # 最多 10 轮：每轮 adb reboot → 抢窗口 → 命中即停
+./reroot.sh                  # 最多 10 轮：等手机进开机窗口 → 发射 → 命中即停（不主动重启）
 ./reroot.sh 20               # 想多刷几轮
 ./reroot.sh --no-reboot      # 设备刚重启过 / 你手动重启完：直接抢窗口
 ./reroot.sh --check          # 只看当前有没有 root（不会重启）
@@ -158,11 +158,41 @@ data_start: payload 依次排列
 1. 已 root 直接退出（幂等，**不会把到手的 root 重启掉**）；
 2. 拆包 → 与设备上的文件逐个比大小，不一致才推（`--redeploy` 强制重推）；
 3. 比对包内 `release` 与设备 `uname -r`，不一致**拒绝执行**（`--force` 才硬打）；
-4. `adb reboot` → 死等 `adb shell` 真的可用 → **立刻发射**；
+4. 死等 `adb shell` 真的可用 → **立刻发射**（脚本**不会主动 reboot**：打崩/卡死时手机会自己重启，
+   脚本只负责等它回来；窗口已过时也是等下一次重启）；
 5. 盯 root 脚本日志，出现 `KernelSU module loaded` 即成功并**立即停手**；
-6. 没中 / panic 重启 → 自动等回来继续；窗口内（`WINDOW` 秒）连刷 `PER_BOOT` 次。
+6. 没中 / panic 重启 → 自动等回来继续；窗口内（`WINDOW` 秒）连刷 `PER_BOOT` 次；
+7. **一旦看到 root 脚本启动（uid0）就停止发射**，只等它把 policy/vrpatch/late-load 做完
+   （补发第二发会把刚拿到的 root 打崩——实测踩过）。
 
 可调环境变量：`TIMEOUT=180`（单次盯多久）、`PER_BOOT=6`、`WINDOW=90`、`GL_DIR=...`（换设备端目录）。
+
+## 管理器（建议：**先装管理器，再跑脚本**）
+
+root 脚本做 late-load 时，用的是**管理器 App 自带的 `libksud.so`**（日志里能看到
+`ksud=/data/app/~~.../com.resukisu.resukisu-.../lib/arm64/libksud.so`），所以先在设备上装好管理器。
+
+**必须选与内核模块 uapi 一致的官方包**（本机实测）：
+
+| 项 | 值 |
+|---|---|
+| 内核驱动 | `v4.2.0-rc3-239e1e88@ReSukiSU (35171/4)` → **uapi 4** |
+| ✅ 可用 | 官方 `ReSukiSU_v4.2.0-rc3_35171-arm64-v8a-release.apk`（uapi 4 + 官方签名）→ 首页显示 **工作中 / LKM / 越狱模式** |
+| ❌ 不认 | 自己从 main 编的（`35231/5`，uapi 5 + 自签名）→ 首页显示"未安装" + 红字"并非官方管理器" |
+
+原因在源码里是硬门槛（`manager/.../Natives.kt:203`）：
+
+```kotlin
+fun isFullFeatured(): Boolean = isManager && kernelUAPIVersion == managerUAPIVersion
+```
+
+自签名过不了 `isManager`，且 main 分支的 uapi 已经走到 5，与 rc3 内核的 4 不等 → 两个条件都挂。
+**结论：管理器用官方 Release APK**；自己编的 APK 只适合"内核模块也同步换到同 uapi"的场景。
+
+```bash
+adb uninstall com.resukisu.resukisu   # 仅当已装过签名不同的版本
+adb install -r ReSukiSU_v4.2.0-rc3_35171-arm64-v8a-release.apk
+```
 
 ## 5. 实测结论：这是个开机窗口竞争
 

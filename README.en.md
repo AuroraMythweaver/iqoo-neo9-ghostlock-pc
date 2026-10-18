@@ -122,7 +122,7 @@ your firmware (the script compares `uname -r` and refuses on mismatch).
 ```bash
 git clone <this-repo> && cd <repo>
 
-./reroot.sh                  # up to 10 rounds: adb reboot → race the window → stop on success
+./reroot.sh                  # up to 10 rounds: wait for a boot window → fire → stop on success (never reboots)
 ./reroot.sh 20               # more rounds
 ./reroot.sh --no-reboot      # device just rebooted / you rebooted it: race right away
 ./reroot.sh --check          # print status only (never reboots)
@@ -169,12 +169,45 @@ originals exactly (`eef05feb…` / `07d6eb23…` / `647fba3d…`).
    (`--redeploy` forces a push);
 3. Compares the packed `release` with the device `uname -r` and **refuses to run** on mismatch
    (`--force` overrides);
-4. `adb reboot` → waits until `adb shell` really works → **fires immediately**;
+4. Waits until `adb shell` really works → **fires immediately**. The script **never reboots**:
+   a crash/hang makes the phone reboot itself; the script just waits for it (and waits for the next
+   reboot when the window has already passed);
 5. Watches the root-script log; stops as soon as `KernelSU module loaded` appears;
 6. On a miss or panic reboot → waits for the device to come back and continues; within the window
-   (`WINDOW` seconds) it fires up to `PER_BOOT` shots.
+   (`WINDOW` seconds) it fires up to `PER_BOOT` shots;
+7. **Once the root script starts (uid 0) it stops firing** and only waits for
+   policy/vrpatch/late-load to finish — a second shot there panics the kernel and destroys the root
+   you just got (learned the hard way).
 
 Environment knobs: `TIMEOUT=180` (watch per shot), `PER_BOOT=6`, `WINDOW=90`, `GL_DIR=...` (device dir).
+
+## Manager app (install it **before** running the script)
+
+When the root script does the late-load it uses the manager app's own `libksud.so` — you can see it in
+the log: `ksud=/data/app/~~.../com.resukisu.resukisu-.../lib/arm64/libksud.so`. So install the manager first.
+
+**It must be the official build whose uapi matches the kernel module** (measured on this device):
+
+| Item | Value |
+|---|---|
+| Kernel module | `v4.2.0-rc3-239e1e88@ReSukiSU (35171/4)` → **uapi 4** |
+| ✅ works | official `ReSukiSU_v4.2.0-rc3_35171-arm64-v8a-release.apk` (uapi 4 + official signature) → shows **Working / LKM / jailbreak mode** |
+| ❌ rejected | self-built from `main` (`35231/5`, uapi 5 + self-signed) → shows "not installed" plus a red "not an official manager" banner |
+
+The gate is explicit in the source (`manager/.../Natives.kt:203`):
+
+```kotlin
+fun isFullFeatured(): Boolean = isManager && kernelUAPIVersion == managerUAPIVersion
+```
+
+A self-signed build fails `isManager`, and `main` already moved to uapi 5 while the rc3 kernel module is
+uapi 4 — both conditions fail. **Use the official Release APK**; a self-built one only makes sense if you
+also move the kernel module to the same uapi.
+
+```bash
+adb uninstall com.resukisu.resukisu   # only if a differently-signed build is installed
+adb install -r ReSukiSU_v4.2.0-rc3_35171-arm64-v8a-release.apk
+```
 
 ## 5. Field results: this is a boot-window race
 

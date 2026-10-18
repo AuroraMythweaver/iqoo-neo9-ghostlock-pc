@@ -29,9 +29,9 @@ PACK="$HERE/ghostlock.bin"
 TIMEOUT="${TIMEOUT:-180}"
 PER_BOOT="${PER_BOOT:-6}"
 WINDOW="${WINDOW:-90}"
+CYCLE_WAIT="${CYCLE_WAIT:-600}"   # 等"手机自己重启"的最长秒数
 
 ROUNDS=10
-NO_REBOOT=0
 CHECK_ONLY=0
 INSPECT=0
 DEPLOY_ONLY=0
@@ -41,7 +41,7 @@ FORCE=0
 
 for a in "$@"; do
   case "$a" in
-    --no-reboot) NO_REBOOT=1 ;;
+    --no-reboot) : ;;   # 兼容旧参数：现在本来就不主动重启
     --check)     CHECK_ONLY=1 ;;
     --inspect)   INSPECT=1 ;;
     --redeploy)  REDEPLOY=1 ;;
@@ -134,6 +134,23 @@ wait_shell() {
     sleep 0.4
   done
   return 1
+}
+
+wait_cycle() {   # 等设备自己重启（掉线再回来）；超时返回 1
+  local t0 dropped=0
+  t0=$(date +%s)
+  say "[i] 等设备自己重启（最多 ${CYCLE_WAIT}s；打崩/卡死时手机会自己重启）…"
+  while [ $(( $(date +%s) - t0 )) -lt "$CYCLE_WAIT" ]; do
+    if ! adb shell 'echo up' 2>/dev/null | grep -q up; then dropped=1; break; fi
+    sleep 3
+  done
+  if [ "$dropped" = 0 ]; then
+    say "[!] ${CYCLE_WAIT}s 内没检测到重启"
+    return 1
+  fi
+  say "[i] 设备掉线，等它回来…"
+  wait_shell || return 1
+  return 0
 }
 
 gen_glrun() {  # gen_glrun <dest>
@@ -231,30 +248,33 @@ fi
 
 need_deploy && deploy
 
-say "[i] 最多 $ROUNDS 轮，每轮窗口内最多 $PER_BOOT 次；判据 = ksu 日志 'KernelSU module loaded'"
+say "[i] 最多 $ROUNDS 轮；脚本不会主动重启设备（卡死/打崩时手机会自己重启）"
 
 WIN=0
 for r in $(seq 1 "$ROUNDS"); do
   say ""
   say "================ 第 $r/$ROUNDS 轮 ================"
 
-  if [ "$NO_REBOOT" = 0 ]; then
-    say "[*] adb reboot"
-    timeout 20 adb reboot >/dev/null 2>&1
-    sleep 2
-  fi
-
   if ! wait_shell; then
     say "[!] 300 秒内没等到 adb shell，再来一轮"
     continue
   fi
-  say "[i] 拿到 shell：uptime=$(uptime_s) 秒（12~45 秒最容易中，>60 秒基本 Write 1 failed）"
+
+  up="$(uptime_s)"; upi="${up%%.*}"
+  if [ -n "$upi" ] && [ "$upi" -gt "$WINDOW" ] 2>/dev/null; then
+    say "[i] 当前 uptime=${up}s，已经过了窗口（12~45 秒才容易中）"
+    say "    脚本不主动重启；等手机自己重启（打崩会重启），或你现在手动重启"
+    if wait_cycle; then say "[i] 设备已重启，继续"; continue; else
+      say "[!] 等不到重启，先退出；重启后再跑本脚本"; break
+    fi
+  fi
+  say "[i] 拿到 shell：uptime=${up}s（越早越好）"
 
   DROPPED=0
   for n in $(seq 1 "$PER_BOOT"); do
     up="$(uptime_s)"; upi="${up%%.*}"
     if [ -n "$upi" ] && [ "$upi" -gt "$WINDOW" ] 2>/dev/null; then
-      say "[i] uptime=${up}s 超出窗口 ${WINDOW}s，准备下一轮"
+      say "[i] uptime=${up}s 超出窗口 ${WINDOW}s，本轮结束"
       break
     fi
     say "---- 第 $r 轮 / 第 $n 次（uptime=${up}s）----"
@@ -263,12 +283,13 @@ for r in $(seq 1 "$ROUNDS"); do
     timeout 25 adb shell "cd $D && GL_RUN_ID=$ts setsid sh $D/glrun.sh </dev/null >/dev/null 2>&1 & echo go" >/dev/null 2>&1
 
     end=$(( $(date +%s) + TIMEOUT ))
+    handoff=0
     klog=""
     while [ "$(date +%s)" -lt "$end" ]; do
       sleep 0.7
       if ! adb shell 'echo up' 2>/dev/null | grep -q up; then
         DROPPED=1
-        say "[!] 设备掉线（panic/重启）——正常失败路径，等它回来"
+        say "[!] 设备掉线（panic/重启）——正常失败路径"
         break
       fi
       klog="$(adb shell "cat $D/ksu-$ts.log 2>/dev/null" 2>/dev/null | tr -d '\r')"
@@ -277,9 +298,18 @@ for r in $(seq 1 "$ROUNDS"); do
       case "$klog" in
         *"fixup failed"*|*"KernelSU module not loaded"*|*"ksud missing"*) break ;;
       esac
-      # native 自己退了（W1 没中）→ 别占窗口，立刻再来一次
+      # root 脚本一旦启动：绝对不要再发新的 exploit（会把它打崩），延长等待直到它跑完
+      if printf '%s' "$klog" | grep -q "root script start"; then
+        if [ "$handoff" = 0 ]; then
+          handoff=1
+          say "    [i] root 脚本已启动（uid0），等它做完 policy/vrpatch/late-load，不再发射"
+          end=$(( $(date +%s) + 120 ))
+        fi
+        continue
+      fi
       if [ "$(sho "test -f $D/native-$ts.rc && echo y")" = "y" ]; then break; fi
     done
+    [ "$handoff" = 1 ] && { [ "$WIN" = 1 ] || say "    [!] root 脚本起来了但没等到 KernelSU loaded"; break; }
 
     [ "$WIN" = 1 ] && break
     [ "$DROPPED" = 1 ] && break
@@ -289,11 +319,12 @@ for r in $(seq 1 "$ROUNDS"); do
 
   [ "$WIN" = 1 ] && break
   if [ "$DROPPED" = 1 ]; then
-    NO_REBOOT=0
-  elif [ "$NO_REBOOT" = 1 ]; then
-    say "[i] --no-reboot：窗口已过，请手动重启后再跑"
-    break
+    say "[i] 等设备回来…"
+    wait_shell || { say "[!] 设备没回来，退出"; break; }
+    continue
   fi
+  say "[i] 本轮没中。等下一次重启（手机自己重启，或你手动重启）…"
+  if wait_cycle; then continue; else break; fi
 done
 
 say ""
