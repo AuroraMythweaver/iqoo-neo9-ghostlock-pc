@@ -25,7 +25,7 @@ c/
 │   └── cmd_blob.c        blob dump / check（离线）
 └── tests/
     ├── mock-adb.py       离线 adb 替身（模拟命中链路）
-    └── run-tests.sh      64 项离线验收
+    └── run-tests.sh      67 项离线验收
 ```
 
 ## 构建
@@ -86,13 +86,13 @@ v1.1 的肌肉记忆也认：`./ghostlock --check`、`--inspect`、`--deploy`、
 | `uname -r` 与 release 逐字符比对，不一致拒绝 | 以 blob 头里的 release 为准（更贴近 native 的检查），`--force` 才硬打 |
 | 死等 `adb shell` 可用后立刻发射 | `gl_wait_shell()` + `uptime` 窗口判断 |
 | 窗口内每轮最多 6 发，uptime > 90 s 停 | `--per-boot` / `--window` |
-| **root 脚本一启动就停火**，等 120 s | `observe()` 里 `root script start` → handoff，延长 deadline 且不再发射 |
+| **root 脚本一启动就停火**，等 120 s | `observe()` 里 `root script start` → handoff，延长 deadline；`run` 见 `handoff/soft` 即结束本 boot，**绝不再发第二发**（有回归测试锁住：launches==1） |
 | 成功 = ksu 日志 `KernelSU module loaded` | 同左，随后 `status` 核验 |
 | 不主动重启；panic 后等设备回来继续 | `wait_cycle()`，不调用 `adb reboot` |
 | 已 root 直接退出（幂等） | `gl_is_root()` 早退，不碰设备 |
 | `--ko` 选本目录 ko → `user.ko` + ksud wrapper | `gl_select_ko()` / `gl_install_ko_wrapper()` |
 | `install-ksu.sh` 的 ksud 定位、insmod、late-load | `cmd_install.c`（含 `--persist`） |
-| `clean.sh` 默认 dry-run，`--yes` 才删 | `cmd_clean.c`，删除只发生在 `--yes` |
+| `clean.sh` 默认 dry-run，`--yes` 才删 | `cmd_clean.c`，删除只发生在 `--yes`；且**只允许清 `/data/local/tmp/<dir>`**（`--dir /data` 会被拒绝） |
 | macOS 的 `timeout`/`dd`/`sed` 兼容问题 | 不存在：没有 shell 拼装，超时在 `poll()` 里实现 |
 
 底层语义来自 `docs/PORTING.md`（字节级）与 v1.1 的实测结论；C 版没有改变任何一条
@@ -100,7 +100,7 @@ v1.1 的肌肉记忆也认：`./ghostlock --check`、`--inspect`、`--deploy`、
 
 ## 验证状态（重要）
 
-**离线验收：64/64 通过**（`make test`），用的是仓库里的**真** payload 包与**真**成功 blob：
+**离线验收：67/67 通过**（`make test`），用的是仓库里的**真** payload 包与**真**成功 blob：
 
 - `inspect`：736 303 B / 4 条目，`release.txt` 正确读出；
 - `blob dump`：2058 B、13 组、82 个键，与 `scripts/ghostlock_profile.py dump` **逐键一致**
@@ -110,9 +110,15 @@ v1.1 的肌肉记忆也认：`./ghostlock --check`、`--inspect`、`--deploy`、
 - release 闸门：不匹配拒绝、`--force` 放行；
 - 完整 `run`：mock 设备模拟 `root script start` → `KernelSU module loaded`，
   驱动识别成功、`status` 变 `root: YES`，第二次运行识别「已经是 root」；
+- **停火回归**：模拟「root 脚本启动但 KSU 没加载」，一次 boot 内只发射 **1** 次
+  （mock 统计 launches==1），不会出现 FIELD-NOTES §2 那种第二发打崩 root；
 - `exec` / `pull-log` / `install --dry-run` / `clean`（dry-run 与 `--yes`）全部走通；
 - ASAN + UBSAN 跑同一套验收，无内存错误、无未定义行为；
 - 测试用的 `adb` 替身记录了所有命令，验收要求「没有未实现的命令」。
+
+> **加固后未重跑测试。** 上面 67/67 是在加固前的版本上跑出来的；之后按评审意见改了
+> 掉线判定、release 复检、clean 路径守卫、`gl_exec` 回收、参数校验等，
+> 按要求**停在验证前**，没有重跑。第一次上真机前建议先 `make test` 再 `check`。
 
 **未在真机上跑过这一版二进制**（本次开发环境没有连手机）。风险点：
 adb 版本差异、设备端 `tail -c +N` / `setenforce` 行为、KSU 授权弹窗等，
@@ -132,7 +138,12 @@ v1.1 已实测，C 版只是同一命令序列的另一种发送方式。第一�
   默认走已验证的 `--load-prebuilt-profile`。
 - 没有交互式 `shell` 子命令；用 `ghostlock exec -- <命令>`（每次一条）。
 - 只支持 POSIX（Linux/WSL/macOS）；Windows 原生没有做。
-- 删除类操作只发生在 `clean --yes`，且只删本工具自己的 payload/日志（与 `clean.sh` 同清单）。
+- 删除类操作只发生在 `clean --yes`，且只删本工具自己的 payload/日志（与 `clean.sh` 同清单）；
+  工作目录必须在 `/data/local/tmp/` 下，否则直接拒绝。
+- 设备端会执行的值（`--profile-file` / `--ksu-pkg` / `--kmi` / 绑核 / 各超时）都做了字符集或
+  整数校验；`--profile-file` 等不再有 shell 注入面。
+- install 专属参数（`--install` / `--ksud` / `--persist` / `--dry-run`）不会静默落到 `run`，
+  会自动选择 `install` 子命令。
 
 ## 退出码
 

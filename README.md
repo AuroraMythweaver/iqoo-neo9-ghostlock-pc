@@ -169,5 +169,5 @@ GhostLock 原项目：[YuKongA/ghostlock-app](https://github.com/YuKongA/ghostlo
 | [`docs/PORTING.md`](docs/PORTING.md) | PC 化全过程：协议/格式的字节级证据、与作者帖子核对 |
 | [`docs/ANALYSIS.md`](docs/ANALYSIS.md) | GhostLock APK 静态分析：漏洞链、`vrpatch.ko` 反汇编 |
 | [`scripts/`](scripts/) | 调参 / 取证用的 python 工具（日常不需要） |
-| [`c/`](c/) | C 版无 UI 驱动（单二进制；`make test` 有 64 项离线验收） |
+| [`c/`](c/) | C 版无 UI 驱动（单二进制；含 mock adb 离线验收） |
 | [`docs/C-PORT.md`](docs/C-PORT.md) | C 版工程记录：设计、行为对齐、离线验证与未验证项 |

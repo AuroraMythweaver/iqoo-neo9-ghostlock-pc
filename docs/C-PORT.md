@@ -29,8 +29,13 @@ bash 版的价值不在语法，而在几条**用真机事故换来的规则**�
 4. release 不一致要拒绝，因为偏移错了就是 panic。
 
 C 版把这几条变成显式状态：`attempt_res { win, soft, dropped, handoff }`，
-`observe()` 里只有 `win` 才提前结束，`handoff` 只延长 deadline、不重新发射。
-这样「停火」不依赖某一行 shell 的 `if` 顺序，代码评审时能直接看到。
+外加外层 `progressed`：只要本次 boot 出现过 `handoff` 或 `soft`（root 脚本启动、
+`child is root!` 等），`run` 就结束本次 boot 的发射循环，只等设备重启或退出。
+`observe()` 里只有 `win` 才提前结束。这样「停火」不依赖某一行 shell 的 `if` 顺序，
+代码评审时能直接看到；测试里用 launches==1 锁住。
+
+开发过程中这里确实犯过一次：第一版只把 `handoff` 记到外层、内层 `per_boot`
+循环仍会继续发射。补了回归测试（`MOCK_NO_KSU=1`，断言只发射一次）后才算修好。
 
 ## 3. 结构
 
@@ -106,8 +111,30 @@ cmd_*.c     其余子命令
 - 部署到 mock 设备上的三个文件与包内条目**逐字节相同**（Python 辅助脚本比对）；
 - 生成的 `glrun.sh` 过 `sh -n`，并检查关键导出/入口行；
 - release 闸门两条路径（拒绝 / `--force` 放行）都验；
-- ASAN + UBSAN 构建跑同一套 64 项验收：无内存错误、无 UB；
-- 结果：**64/64 通过**，`unmatched.log` 为空。
+- **停火回归**：`MOCK_NO_KSU=1` 时 mock 的 launches 必须是 1——第一次写错的地方
+  由这条测试兜住；
+- ASAN + UBSAN 构建跑同一套 67 项验收：无内存错误、无 UB；
+- 结果：**67/67 通过**（加固前那版），`unmatched.log` 为空；加固改动未重跑。
+
+## 6.1 独立审计后的加固（未重跑测试）
+
+初版完成后做了一次独立代码审计，修了以下问题（属于「正确性/安全」而非新功能）：
+
+| # | 问题 | 修法 |
+|---|---|---|
+| 1 | `clean --yes --dir /data` 会以 root `rm -rf /data` | clean 只接受 `/data/local/tmp/<非空子目录>`，其余直接拒绝 |
+| 2 | 单次 4 s `echo ping` 超时被当成重启；且先判 dropped 后判 handoff，可能丢掉已看到的 handoff 并二次发射 | 连续 3 次失败才判掉线；handoff/soft 优先于 dropped；掉线恢复后要求 uptime 归零才继续 |
+| 3 | 推不出 release 时静默跳过闸门；已部署的 payload 只比大小，OTA 后不复检 | 推不出 release = 拒绝（`--force` 才放行）；`run` 在发射前总是复检 release |
+| 4 | `.rc` 出现后的最后一段日志不再判成功标记 | 最后一段 native 日志 + 一次补读 ksu 日志后重新判 win/fail/handoff |
+| 5 | `gl_exec` 超时后 `waitpid` 可能永久阻塞；`read()` 的 EINTR 被当成 EOF | SIGKILL 后 WNOHANG 有界回收（5 s）；EINTR 不再置 EOF |
+| 6 | `/tmp/glrel.<pid>` 可预测临时文件 | 改成直接 `fread` 包内 release.txt，不再写临时文件 |
+| 7 | 只给 install 参数时默认落到 `run` | 检测到 install 专属参数即选 `install` |
+| 8 | `--profile-file` 等值进入设备 shell 前未校验 | 字符集/整数校验；`--dump-kernel-log` 限定绝对路径字符集 |
+| 9 | `--kmi` 没有消费者，`.gl_kmi` / `.gl_ksu_pkg` 从不写 | deploy 时写入这两个提示文件；`--window/--cycle-wait/--handoff-wait` 下限 1 |
+| 10 | `--clean-after` 硬编码 `profile.bin`，漏 `profile.len` 等 | 按 `--profile-file` 生成清单，补 `profile.len/incoming.ko/.last_ts` |
+
+**这些改动按要求没有重跑测试套件**：`make test` 的 67 项结果属于加固前那版；上真机前
+应先跑一遍。改动本身都很局部，但「没跑 = 没验证」这条不例外。
 
 ## 6. 未验证项与风险
 
