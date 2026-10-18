@@ -1,33 +1,22 @@
 #!/usr/bin/env bash
 # ============================================================================
-# install-ksu.sh —— 提权之后，加载【你自己提供的 .ko】并安装配套管理器
+# install-ksu.sh —— 提权之后：加载你自己的 .ko，并安装配套的 KSU 管理器
 #
-#   和酷安原作者 APK 的做法一致（同一个加载器），区别只有 ko 的来源：
-#     APK：ksud late-load  → 用 libksud.so 里 include_bytes! 的内嵌 {kmi}_kernelsu.ko
-#     本脚本：ksud insmod <你目录里的 .ko>   → ksuinit 同一个 loader
-#             再 ksud late-load（此时 has_kernelsu() 为真，只会做 bootstrap：
-#             安装 ksud 到 /data/adb、module 处理、sepolicy、features）
+#   和原作者 APK 用同一个加载器（ksuinit::load_module）：
+#     ksud insmod <你的.ko> allow_shell=1     ← ko 由你提供，不取 APK 内嵌
+#     ksud late-load ...                      ← 此时模块已在，只做用户态 bootstrap
 #
-#   为什么用 insmod 而不是 late-load 自带 ko：
-#     late_load.rs:  if ksuinit::has_kernelsu() { skip }  else { load 内嵌 ko }
-#     debug.rs  insmod: ksuinit::load_module(&module_data, params)   ← 同一个函数
-#   所以外部 ko 能被完全一样地加载（含 vermagic 重写重试）。
+#   把 xxx_kernelsu.ko / 管理器.apk 放在本脚本同级目录，先 ./reroot.sh 提权，再：
 #
-# 用法（在解压目录里、且已 ./reroot.sh 成功提权后执行）：
-#   ./install-ksu.sh                    # 预览：列本目录的 .ko / .apk、当前内核与管理器状态
-#   ./install-ksu.sh --ko 1             # 加载列表里第 1 个 ko
-#   ./install-ksu.sh --ko android13-5.15_kernelsu.ko
-#   ./install-ksu.sh --install 1        # 安装列表里第 1 个管理器 APK
-#   ./install-ksu.sh --ko 1 --install 1 # 一步做完
-#   ./install-ksu.sh --persist --ko 1   # 让以后每次 reroot.sh 都用这个 ko（写 wrapper）
-#   ./install-ksu.sh --ksud /data/adb/ksu/bin/ksud   # 指定 ksud
-#   ./install-ksu.sh --pkg com.sukisu.ultra          # 指定管理器包名
-#   ./install-ksu.sh --yes              # 跳过确认
+#     ./install-ksu.sh                    # 预览：列本目录 ko / apk、当前内核状态
+#     ./install-ksu.sh --ko 1             # 加载第 1 个 ko
+#     ./install-ksu.sh --ko 1 --install 1 # 加载 + 装管理器
+#     ./install-ksu.sh --persist --ko 1   # 以后每次 reroot.sh 都用这个 ko（重启生效）
+#     ./install-ksu.sh --dry-run --ko 1   # 只看计划
 #
-# 说明：
-#   * 内核里同一时刻只能有一个 kernelsu 模块；已加载时加载新 ko 必须重启，
-#     脚本会提示 --persist → 重启 → ./reroot.sh 的流程。
-#   * 不改系统分区：只 push 一个 .ko 到 /data/local/tmp 并 init_module。
+#   其它：--ksud <path> 指定 ksud；--pkg <pkg> 指定管理器包名；--yes 跳过确认
+#
+#   注意：内核里只能有一个 kernelsu 模块；已加载时换 ko 必须先重启。
 # ============================================================================
 set -u
 

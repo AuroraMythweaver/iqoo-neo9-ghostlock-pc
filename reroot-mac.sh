@@ -1,32 +1,25 @@
 #!/usr/bin/env bash
 # ============================================================================
-# reroot-mac.sh —— iQOO Neo9 (PD2338) 一键（重新）root   【macOS 专用版】
+# reroot.sh —— iQOO Neo9 (PD2338) 一键临时 root（macOS 专用）
 #
-#   与 reroot.sh 的区别：只依赖 macOS 自带工具（BSD dd / BSD sed / 无 timeout）
-#   - 解包用 tail -c | head -c（不用 GNU 的 dd iflag=skip_bytes）
-#   - 超时用 timeout / gtimeout / 无超时三种降级
-#   - adb 自动探测（Android Studio SDK / Homebrew）
-#   - 不用 seq（改成 bash 算术 for 循环）
-#   - 兼容 macOS 自带的 bash 3.2
+#   同目录需要两个文件：
+#     reroot.sh        本脚本（纯 bash + adb）
+#     ghostlock.bin    payload：libghostlock.so + vrpatch.ko + profile.bin
 #
-#   需要的东西只有两个文件，放在同一个目录：
-#       reroot.sh          本脚本（纯 bash + adb，无 python 依赖）
-#       ghostlock.bin      payload 包：libghostlock.so + vrpatch.ko + profile.bin
-#
-#   原理：GhostLock (CVE-2026-43499) 是**开机窗口竞争**，命中窗口约 boot 后 12~45 秒，
-#         所以流程 = 重启 -> 一有 adb shell 立刻发射 -> 盯 root 脚本日志
-#         -> 看到 "KernelSU module loaded" 立即停手（late-load 只在内存里，别重启）。
+#   与 reroot.sh 行为一致，只依赖 macOS 自带工具（BSD dd / 无 timeout / 无 seq）。
+#   原理见 README；脚本只负责：等开机窗口 → 发射 → 命中即停。
+#   成功判据 = root 日志出现 "KernelSU module loaded"。
+#   脚本不会主动重启手机（失败时手机会自己重启）。
 #
 #   用法：
-#     ./reroot.sh                 # 最多 10 轮
-#     ./reroot.sh 20              # 最多 20 轮
-#     ./reroot.sh --no-reboot     # 设备刚重启过 / 手动重启完：直接抢窗口
-#     ./reroot.sh --check         # 只看状态，不重启
-#     ./reroot.sh --inspect       # 看包内容
-#     ./reroot.sh --deploy        # 只布署 payload，不打
-#     ./reroot.sh --check-payload # 只看设备上的 payload 是否已就绪
-#     ./reroot.sh --redeploy      # 强制重推 payload
-#     ./reroot.sh --force         # release 不匹配也硬打（会风险 panic，慎用）
+#     ./reroot-mac.sh                 # 最多 10 轮
+#     ./reroot-mac.sh 20              # 最多 20 轮
+#     ./reroot-mac.sh --check         # 只看状态
+#     ./reroot-mac.sh --inspect       # 看 payload 包内容
+#     ./reroot-mac.sh --deploy        # 只部署 payload
+#     ./reroot-mac.sh --check-payload # 只看设备上的 payload 是否就绪
+#     ./reroot-mac.sh --redeploy      # 强制重推 payload
+#     ./reroot-mac.sh --force         # release 不匹配也打（可能 panic，慎用）
 # ============================================================================
 set -u
 
@@ -172,7 +165,7 @@ wait_shell() {
 wait_cycle() {   # 等设备自己重启（掉线再回来）；超时返回 1
   local t0 dropped=0
   t0=$(date +%s)
-  say "[i] 等设备自己重启（最多 ${CYCLE_WAIT}s；打崩/卡死时手机会自己重启）…"
+  say "[i] 等设备自己重启（最多 ${CYCLE_WAIT}s）…"
   while [ $(( $(date +%s) - t0 )) -lt "$CYCLE_WAIT" ]; do
     if ! "$ADB" shell 'echo up' 2>/dev/null | grep -q up; then dropped=1; break; fi
     sleep 3
@@ -281,7 +274,7 @@ fi
 
 need_deploy && deploy
 
-say "[i] 最多 $ROUNDS 轮；脚本不会主动重启设备（卡死/打崩时手机会自己重启）"
+say "[i] 最多 $ROUNDS 轮；脚本不会主动重启设备"
 
 WIN=0
 for (( r = 1; r <= ROUNDS; r++ )); do
@@ -296,7 +289,7 @@ for (( r = 1; r <= ROUNDS; r++ )); do
   up="$(uptime_s)"; upi="${up%%.*}"
   if [ -n "$upi" ] && [ "$upi" -gt "$WINDOW" ] 2>/dev/null; then
     say "[i] 当前 uptime=${up}s，已经过了窗口（12~45 秒才容易中）"
-    say "    脚本不主动重启；等手机自己重启（打崩会重启），或你现在手动重启"
+    say "    等手机自己重启，或你现在手动重启"
     if wait_cycle; then say "[i] 设备已重启，继续"; continue; else
       say "[!] 等不到重启，先退出；重启后再跑本脚本"; break
     fi
@@ -331,7 +324,7 @@ for (( r = 1; r <= ROUNDS; r++ )); do
       case "$klog" in
         *"fixup failed"*|*"KernelSU module not loaded"*|*"ksud missing"*) break ;;
       esac
-      # root 脚本一旦启动：绝对不要再发新的 exploit（会把它打崩），延长等待直到它跑完
+      # root 脚本启动后不再发射，延长等待直到它跑完
       if printf '%s' "$klog" | grep -q "root script start"; then
         if [ "$handoff" = 0 ]; then
           handoff=1

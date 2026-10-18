@@ -1,24 +1,18 @@
 #!/usr/bin/env bash
 # ============================================================================
-# clean.sh —— 清理 GhostLock PC 驱动的 device 侧残留
+# clean.sh —— 清理 GhostLock PC 驱动的设备侧残留
 #
-#   分两类，别搞混：
-#    A. 内存态（kernelsu late-load / vrpatch 对 vr.ko 的补丁 / SELinux 状态与
-#       policy 补丁 / 临时 cred）—— **reboot 就没了**，不需要删任何文件。
-#    B. 磁盘态（payload、日志、测试目录、KSU 用户态、管理器 APK）—— 要删。
+#   内存态（KSU 模块、vrpatch 补丁、SELinux 状态、临时 cred）重启即消失；
+#   磁盘态（payload、日志、KSU 用户态、管理器 APK）用本脚本删。
+#   顺序：趁 root 还在先删文件，再 reboot。
 #
-#   正确顺序：趁 root 还在先删文件（root 属主的日志 shell 删不掉），
-#             再 reboot 把内核态清掉（root 随之消失）。
+#   ./clean.sh                        # dry-run：只列清单
+#   ./clean.sh --yes                  # 删 payload / 日志 / 测试目录 + 收残留进程
+#   ./clean.sh --yes --ksu            # 再删 KSU 用户态（/data/adb/ksud、/data/adb/ksu/*）
+#   ./clean.sh --yes --uninstall      # 再卸载管理器 APK
+#   ./clean.sh --yes --all --reboot   # 全清 + 重启（推荐收尾）
 #
-# 用法（默认只列出要删什么，不动手）：
-#   ./clean.sh                        # dry-run：列出清单 + 体积
-#   ./clean.sh --yes                  # 真删：工作目录 + 测试目录 + 残留进程
-#   ./clean.sh --yes --ksu            # 再删 KSU 用户态（/data/adb/ksud、/data/adb/ksu/*，约 91 MB）
-#   ./clean.sh --yes --uninstall      # 再卸载管理器 APK com.resukisu.resukisu
-#   ./clean.sh --yes --all --reboot   # 全清 + 重启（推荐：一步回到干净系统）
-#
-#   --all = --ksu --uninstall
-#   --reboot 只在 --yes 时生效
+#   --all = --ksu --uninstall；--reboot 只在 --yes 时生效
 # ============================================================================
 set -u
 
