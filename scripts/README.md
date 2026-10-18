@@ -12,15 +12,16 @@ ghostlock/
 ```
 
 ```bash
-cd /home/qinghuan/SomeIDEA/app/ghostlock
-
-./reroot.sh                  # 最多 10 轮；每轮自动重启，命中即停
+# 在解压后的目录里（该目录含 reroot.sh 与 ghostlock.bin）
+./reroot.sh                  # 最多 10 轮：等开机窗口 → 发射 → 命中即停（不主动重启）
 ./reroot.sh 20               # 想多刷几轮
-./reroot.sh --no-reboot      # 设备刚重启过（或你手动重启完）：直接抢窗口
-./reroot.sh --check          # 只看当前有没有 root（不会重启）
+./reroot.sh --check          # 只看当前有没有 root
 ./reroot.sh --inspect        # 看包里有什么
 ./reroot.sh --deploy         # 只布署 payload，不打
 ./reroot.sh --check-payload  # 看设备上的 payload 是否已就绪（不会重推）
+./clean.sh                   # 清理清单（dry-run，默认不动手）
+
+# macOS 用 ./reroot-mac.sh（同样的参数）
 ```
 
 它做的事（每一步都有实测依据）：
