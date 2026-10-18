@@ -73,6 +73,10 @@ ghostlock-pc-v1.1/
 | `install-ksu.sh` | 提权之后：加载**你自己的 `.ko`**、装任意 KSU 管理器 |
 | `clean.sh` | 清理 / 卸载（默认只列清单） |
 
+> 另有一个 **C 版无 UI 驱动**（[`c/`](c/)）：单二进制、无 Python 依赖，
+> `cd c && make` 出 `./ghostlock`，功能对齐上面三个脚本（`run/check/deploy/status/
+> install/clean/pull-log/exec`）。详见 [`c/README.md`](c/README.md)。
+
 常用参数（`reroot.sh`）：
 
 ```bash
@@ -165,3 +169,5 @@ GhostLock 原项目：[YuKongA/ghostlock-app](https://github.com/YuKongA/ghostlo
 | [`docs/PORTING.md`](docs/PORTING.md) | PC 化全过程：协议/格式的字节级证据、与作者帖子核对 |
 | [`docs/ANALYSIS.md`](docs/ANALYSIS.md) | GhostLock APK 静态分析：漏洞链、`vrpatch.ko` 反汇编 |
 | [`scripts/`](scripts/) | 调参 / 取证用的 python 工具（日常不需要） |
+| [`c/`](c/) | C 版无 UI 驱动（单二进制；`make test` 有 64 项离线验收） |
+| [`docs/C-PORT.md`](docs/C-PORT.md) | C 版工程记录：设计、行为对齐、离线验证与未验证项 |
