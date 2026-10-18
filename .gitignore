@@ -11,3 +11,7 @@ __pycache__/
 /native-*.log
 /ksu-*.log
 /*.rc
+
+# C CLI build output
+/c/ghostlock
+/c/src/*.o
