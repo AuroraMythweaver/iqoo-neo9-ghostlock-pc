@@ -30,6 +30,7 @@ PACK="$HERE/ghostlock.bin"
 TIMEOUT="${TIMEOUT:-180}"
 PER_BOOT="${PER_BOOT:-6}"
 WINDOW="${WINDOW:-90}"
+MIN_UPTIME="${MIN_UPTIME:-30}"   # 窗口下沿：太早打容易 panic，等 uptime 到这里再发射
 CYCLE_WAIT="${CYCLE_WAIT:-600}"   # 等"手机自己重启"的最长秒数
 
 ROUNDS=10
@@ -122,7 +123,7 @@ do_inspect() {
 
 # ---------------------------------------------------------------- adb 小工具
 sho() { timeout 8 adb shell "$1" 2>/dev/null | tr -d '\r'; }
-pushf() { timeout 60 adb push "$1" "$2" >/dev/null 2>&1; }
+pushf() { local i; for i in 1 2 3; do timeout 60 adb push "$1" "$2" >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
 uptime_s() { sho 'cut -d" " -f1 /proc/uptime' | head -n1; }
 dev_size() { sho "wc -c < $D/$1" | tr -d ' '; }
 
@@ -195,51 +196,92 @@ select_ko() {   # 结果写进 KO_FILE；没有/跳过返回 1
   say "[!] 编号无效"; return 1
 }
 
-managers() {   # 已装的 KSU 系管理器包名
-  sho 'pm list packages 2>/dev/null' | sed 's/^package://' \
-    | grep -iE 'sukisu|resukisu|bakasu|kernelsu|ksunext|supermanager' | sort -u
+managers() {   # 已装的 KSU 系管理器包名（开机前几秒 pm 可能没就绪，重试）
+  local i out
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    out="$(sho 'pm list packages 2>/dev/null' | sed 's/^package://' \
+           | grep -iE 'sukisu|resukisu|bakasu|kernelsu|ksunext|supermanager' | sort -u)"
+    [ -n "$out" ] && { printf '%s\n' "$out"; return 0; }
+    sleep 0.5
+  done
+  return 0
 }
 
-mgr_ksud() {   # mgr_ksud <pkg> → 该 APK 内的 libksud.so（shell 可直接 stat；glob 不可用）
-  local apk
+mgr_ksud() {   # mgr_ksud <pkg> → 该 APK 里的 ksud 动态库
+  # 注意：新版 APK 会把 ksud 改成随机库名（如 libdhxddxovny.so），不能只认 libksud.so；
+  #       /data/app 对 shell 不可列，所以用 pm path + 直接 ls 目标目录（可读）
+  local apk dir out p
   apk="$(sho "pm path $1 2>/dev/null" | sed 's/^package://' | head -1)"
-  [ -n "$apk" ] && printf '%s\n' "$(dirname "$apk")/lib/arm64/libksud.so"
+  [ -n "$apk" ] || return 0
+  dir="${apk%/*}/lib/arm64"
+  out="$(sho "ls -l $dir/*.so 2>/dev/null")"
+  [ -n "$out" ] || return 0
+  # 1) 标准名
+  p="$(printf '%s\n' "$out" | awk '{print $NF}' | grep -E '/libksud\.so$' | head -1)"
+  # 2) 否则取体积最大的那个（ksud 有 ~3-6 MB，其余 JNI 库都是几十 KB）
+  [ -z "$p" ] && p="$(printf '%s\n' "$out" | awk '$5+0 >= 1000000 {print $5, $NF}' \
+                    | sort -nr | head -1 | awk '{print $2}')"
+  [ -n "$p" ] && printf '%s\n' "$p"
   return 0
 }
 
 install_wrapper() {   # install_wrapper <pkg> <real-ksud>
-  local pkg="$1" real="$2" w
-  w="$(mktemp)"; cat > "$w" <<EOS
+  local pkg="$1" real="$2" w t
+  w="$(mktemp)"; t="$(mktemp)"
+  cat > "$t" <<'TEMPLATE_EOF'
 #!/system/bin/sh
 # root 脚本的 ksud 入口：late-load 时先 insmod 指定 ko，再交给真 ksud 做 bootstrap
-KO='$D/user.ko'
-PKG='$pkg'
-LOG='$D/.gl_wrap.log'
+D='@D@'
+export PATH=/system/bin:/system/xbin:/vendor/bin:$PATH
+KO="$D/user.ko"
+PKG='@PKG@'
+SRC='@SRC@'
+LOG="$D/.gl_wrap.log"
+log() { echo "$*" >> "$LOG" 2>/dev/null; }
 REAL=''
-for R in '$real' /data/adb/ksu/bin/ksud /data/adb/ksud /data/local/tmp/ksud; do
-  [ -n "\$R" ] && [ -x "\$R" ] && { REAL="\$R"; break; }
-done
-[ -n "\$REAL" ] || REAL=\$(ls -d /data/app/*/*/lib/arm64/libksud.so 2>/dev/null | head -1)
-[ -n "\$REAL" ] || { echo "no ksud found" >> "\$LOG"; exit 90; }
-if [ "\$1" = "late-load" ]; then
+# 1) 工作目录里已备好的可执行 ksud（发布包自带或上次复制下来的）
+[ -x "$D/ksud.real" ] && REAL="$D/ksud.real"
+# 2) 系统里已安装的
+if [ -z "$REAL" ]; then
+  for R in /data/adb/ksu/bin/ksud /data/adb/ksud /data/local/tmp/ksud; do
+    [ -x "$R" ] && { REAL="$R"; break; }
+  done
+fi
+# 3) 从管理器 APK 的库里复制一份出来再执行（应用库不允许直接 exec）
+if [ -z "$REAL" ] && [ -n "$SRC" ]; then
+  cp "$SRC" "$D/ksud.real" 2>/dev/null && chmod 755 "$D/ksud.real" 2>/dev/null && REAL="$D/ksud.real"
+fi
+# 4) pm path 兜底：找 APK 目录里体积最大的 .so，复制出来
+if [ -z "$REAL" ]; then
+  P=$(pm path "$PKG" 2>/dev/null | head -n1 | sed 's/^package://')
+  if [ -n "$P" ]; then
+    DIR="${P%/*}/lib/arm64"
+    BIG=$(ls -l "$DIR"/*.so 2>/dev/null | awk '$5+0 >= 1000000 {print $5, $NF}' | sort -nr | head -1 | awk '{print $2}')
+    [ -n "$BIG" ] && cp "$BIG" "$D/ksud.real" 2>/dev/null && chmod 755 "$D/ksud.real" 2>/dev/null && REAL="$D/ksud.real"
+  fi
+fi
+[ -n "$REAL" ] || { log "no ksud found (pkg=$PKG src=$SRC)"; exit 90; }
+log "ksud=$REAL pkg=$PKG"
+if [ "$1" = "late-load" ]; then
   shift
   ARGS=""
-  while [ \$# -gt 0 ]; do
-    case "\$1" in
+  while [ $# -gt 0 ]; do
+    case "$1" in
       --package-name) shift 2; continue ;;
       --package-name=*) shift; continue ;;
-      *) ARGS="\$ARGS \$1"; shift ;;
+      *) ARGS="$ARGS $1"; shift ;;
     esac
   done
-  if [ -f "\$KO" ]; then
-    echo "== insmod \$KO ==" >> "\$LOG"
-    "\$REAL" insmod "\$KO" allow_shell=1 >> "\$LOG" 2>&1
-    echo "insmod exit=\$?" >> "\$LOG"
+  if [ -f "$KO" ]; then
+    log "== insmod $KO =="
+    "$REAL" insmod "$KO" allow_shell=1 >> "$LOG" 2>&1
+    log "insmod exit=$?"
   fi
-  exec "\$REAL" late-load --package-name "\$PKG" \$ARGS
+  exec "$REAL" late-load --package-name "$PKG" $ARGS
 fi
-exec "\$REAL" "\$@"
-EOS
+exec "$REAL" "$@"
+TEMPLATE_EOF
+  sed "s|@D@|$D|g; s|@PKG@|$pkg|g; s|@SRC@|$real|g" "$t" > "$w"; rm -f "$t"
   pushf "$w" "$D/ksud" || { rm -f "$w"; die "push wrapper 失败"; }
   rm -f "$w"
   # 用 wrapper 时必须让 .gl_ksu_pkg 为空，root 脚本才会优先用 $HOME_DIR/ksud
@@ -271,9 +313,31 @@ setup_ksu_target() {   # 决定这次 root 脚本用哪个 ksud、以及 --packa
     say "[*] ksud：$(basename "$KSUD_OPT")（用户指定）"
   fi
 
-  # B) 管理器 APK 里的 libksud.so
+  # A2) 脚本目录里自带的 ksud 二进制（发布包里有 ksud-aarch64-linux-android）
+  if [ -z "$kreal" ]; then
+    local lk
+    lk="$(find "$HERE" -maxdepth 1 -type f -name 'ksud*' ! -name '*.ko' 2>/dev/null | head -1)"
+    if [ -n "$lk" ]; then
+      pushf "$lk" "$D/ksud.real" || die "push ksud 失败"
+      sho "chmod 755 $D/ksud.real" >/dev/null 2>&1
+      kreal="$D/ksud.real"
+      say "[*] ksud：$(basename "$lk")（脚本目录自带）"
+    fi
+  fi
+
+  # B) 管理器 APK 里的 ksud 库（可能叫 libksud.so，也可能是随机名，几 MB 那个）
   lib=""
   [ -n "$pkg" ] && [ -z "$kreal" ] && lib="$(mgr_ksud "$pkg")"
+  if [ -n "$lib" ] && [ -z "$kreal" ]; then
+    # 从 /data/app 复制到工作目录再执行（避免 SELinux 直接 exec 应用库）
+    if sho "cp '$lib' '$D/ksud.real' 2>/dev/null && chmod 755 '$D/ksud.real' && test -x '$D/ksud.real' && echo ok" | grep -q ok; then
+      kreal="$D/ksud.real"
+      say "[*] ksud：从管理器 APK 取出 → $D/ksud.real（$(basename "$lib")）"
+    else
+      say "[!] 复制管理器里的 ksud 失败，退回直接路径：$lib"
+      kreal="$lib"
+    fi
+  fi
 
   if [ -n "$KO_FILE" ] && [ -z "$kreal" ] && [ -z "$lib" ]; then
     say "[!] 没找到任何 ksud：先 adb install 管理器 APK，或 --ksud <ksud 二进制>"
@@ -430,6 +494,13 @@ for r in $(seq 1 "$ROUNDS"); do
     fi
     say "---- 第 $r 轮 / 第 $n 次（uptime=${up}s）----"
 
+    # 对齐窗口下沿：uptime 太小就先等（实测成功集中在 32~40 秒）
+    upi2="${up%%.*}"
+    if [ -n "$upi2" ] && [ "$upi2" -lt "$MIN_UPTIME" ] 2>/dev/null; then
+      d=$(( MIN_UPTIME - upi2 ))
+      say "    等 ${d}s 到 uptime≈${MIN_UPTIME}s 再发射"
+      sleep "$d"
+    fi
     ts="$(date +%s)-$r-$n"
     timeout 25 adb shell "cd $D && GL_RUN_ID=$ts setsid sh $D/glrun.sh </dev/null >/dev/null 2>&1 & echo go" >/dev/null 2>&1
 
