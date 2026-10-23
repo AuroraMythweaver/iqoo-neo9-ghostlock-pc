@@ -27,7 +27,7 @@ Takes the root app's job off the phone: drive the original native exploit from y
 You need `adb`. Linux / WSL / macOS all work (on macOS use `reroot-mac.sh`; no coreutils needed).
 
 ```bash
-unzip ghostlock-pc-iqoo-neo9-v1.1-linux.zip && cd ghostlock-pc-v1.1
+unzip ghostlock-pc-iqoo-neo9-v1.2-linux.zip && cd ghostlock-pc-v1.2
 chmod +x *.sh
 ./reroot.sh                 # macOS: ./reroot-mac.sh
 ```
@@ -48,7 +48,7 @@ adb shell su -c 'id'
 What is inside the archive:
 
 ```
-ghostlock-pc-v1.1/
+ghostlock-pc-v1.2/
 ├── reroot.sh         main script (Linux/WSL)   ├── install-ksu.sh  load your ko / install a manager
 ├── reroot-mac.sh     main script (macOS)       ├── clean.sh        cleanup (dry-run by default)
 ├── ghostlock.bin     payload (3 exploit files)  └── README / QUICKSTART / SHA256SUMS

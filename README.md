@@ -26,7 +26,7 @@
 需要 `adb`。Linux / WSL / macOS 都行（macOS 用 `reroot-mac.sh`，不用装 coreutils）。
 
 ```bash
-unzip ghostlock-pc-iqoo-neo9-v1.1-linux.zip && cd ghostlock-pc-v1.1
+unzip ghostlock-pc-iqoo-neo9-v1.2-linux.zip && cd ghostlock-pc-v1.2
 chmod +x *.sh
 ./reroot.sh                 # macOS: ./reroot-mac.sh
 ```
@@ -47,7 +47,7 @@ adb shell su -c 'id'
 包里有什么：
 
 ```
-ghostlock-pc-v1.1/
+ghostlock-pc-v1.2/
 ├── reroot.sh         主脚本（Linux/WSL）      ├── install-ksu.sh  提权后装 ko/管理器
 ├── reroot-mac.sh     主脚本（macOS 专用）     ├── clean.sh        清理（默认 dry-run）
 ├── ghostlock.bin     payload（exploit 三件套）└── README / QUICKSTART / SHA256SUMS
