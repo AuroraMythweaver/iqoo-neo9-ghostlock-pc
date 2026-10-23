@@ -124,6 +124,30 @@ adbd 重新建立会话会自动 `mkdir` 回来，所以"一 adb 就有了"在�
 
 ---
 
+## 7.5 `--ko` 的 wrapper 曾经栽在 `/data/app` 不可列
+
+`--ko` 的实现是往 `$HOME_DIR/ksud` 放一个 wrapper：`late-load` 时先 `insmod user.ko`，
+再 exec 真 ksud 做 bootstrap。第一版在**生成 wrapper 时**用
+
+```sh
+ls -d /data/app/*/*/lib/arm64/libksud.so
+```
+
+解析真 ksud —— 但 `/data/app` 是 `0711 root:root`，shell（uid 2000）**只能穿过、不能列**，
+glob 不展开，结果是空字符串；运行时兜底 `/data/adb/ksud` 又因为更新管理器后不存在，
+wrapper 一律 `exit 90`：
+
+```
+[*] ksud=/data/local/tmp/ghostlock-app/ksud
+[*] vrpatch exit=90
+[*] late-load exit=90
+[!] KernelSU module not loaded
+```
+
+正确做法：用 `pm path <pkg>` 拿 APK 绝对路径，再拼 `lib/arm64/libksud.so`（shell 可直接 stat），
+并在 wrapper 里保留"运行时以 root 再 glob 一次"的兜底。另外 wrapper 会把自己的 `insmod` 输出
+写进 `$HOME_DIR/.gl_wrap.log`，失败时脚本会把该日志和 root 脚本尾部一起打出来。
+
 ## 8. 其它零散记录
 
 - 设备有两个用户（`0` 机主 / `666` XSpace）。shell 若挂在 666 上，`pm list packages` 会被限制（看不到 user 0 的包）。

@@ -207,30 +207,58 @@ select_ko() {   # 结果写进 KO_FILE；没有/跳过返回 1
   say "[!] 编号无效"; return 1
 }
 
-install_user_ko() {   # 布置：user.ko + ksud wrapper（让 root 脚本 late-load 时先加载你的 ko）
+install_user_ko() {   # 布置：user.ko + ksud wrapper（root 脚本 late-load 时先加载你的 ko）
   [ -n "$KO_FILE" ] || return 0
   say "[*] 指定 ko：$(basename "$KO_FILE")"
   adb push "$KO_FILE" "$D/user.ko" >/dev/null 2>&1 || die "push ko 失败"
   adb shell "chmod 644 $D/user.ko" >/dev/null 2>&1
-  REAL="$(sho "ls -d /data/app/*/*/lib/arm64/libksud.so 2>/dev/null | head -1")"
+
+  # 管理器包名 + 它 APK 里的 libksud.so
+  # 注意：/data/app 对 shell 不可列，glob 展开会失败，必须走 pm path
+  PKG_M="$(adb shell 'pm list packages 2>/dev/null' | tr -d '\r' | sed 's/^package://' \
+           | grep -iE 'sukisu|resukisu|bakasu|kernelsu|ksunext|supermanager' | head -1)"
+  [ -n "$PKG_M" ] || PKG_M=com.sukisu.ultra
+  APK_M="$(adb shell "pm path $PKG_M 2>/dev/null" | tr -d '\r' | sed 's/^package://' | head -1)"
+  LIB_M=""
+  [ -n "$APK_M" ] && LIB_M="$(dirname "$APK_M")/lib/arm64/libksud.so"
+  say "    manager=$PKG_M"
+  [ -n "$LIB_M" ] && say "    ksud=$LIB_M"
+
   W="$(mktemp)"; cat > "$W" <<EOS
 #!/system/bin/sh
+# install-ksu wrapper：late-load 时先 insmod 用户的 ko，再交给真 ksud 做 bootstrap
 KO='$D/user.ko'
-REAL=""
-for R in '$REAL' /data/adb/ksu/bin/ksud /data/adb/ksud /data/local/tmp/ksud; do
-  [ -x "\$R" ] && { REAL="\$R"; break; }
+PKG='$PKG_M'
+LOG='$D/.gl_wrap.log'
+REAL=''
+for R in '$LIB_M' /data/adb/ksu/bin/ksud /data/adb/ksud /data/local/tmp/ksud; do
+  [ -n "\$R" ] && [ -x "\$R" ] && { REAL="\$R"; break; }
 done
-[ -n "\$REAL" ] || exit 90
+[ -n "\$REAL" ] || REAL=\$(ls -d /data/app/*/*/lib/arm64/libksud.so 2>/dev/null | head -1)
+[ -n "\$REAL" ] || { echo "no ksud found" >> "\$LOG"; exit 90; }
 if [ "\$1" = "late-load" ]; then
   shift
-  [ -f "\$KO" ] && "\$REAL" insmod "\$KO" allow_shell=1 >/dev/null 2>&1
-  exec "\$REAL" late-load "\$@"
+  ARGS=""
+  while [ \$# -gt 0 ]; do
+    case "\$1" in
+      --package-name) shift 2; continue ;;
+      --package-name=*) shift; continue ;;
+      *) ARGS="\$ARGS \$1"; shift ;;
+    esac
+  done
+  if [ -f "\$KO" ]; then
+    echo "== insmod \$KO ==" >> "\$LOG"
+    "\$REAL" insmod "\$KO" allow_shell=1 >> "\$LOG" 2>&1
+    echo "insmod exit=\$?" >> "\$LOG"
+  fi
+  exec "\$REAL" late-load --package-name "\$PKG" \$ARGS
 fi
 exec "\$REAL" "\$@"
 EOS
   adb push "$W" "$D/ksud" >/dev/null 2>&1 || { rm -f "$W"; die "push wrapper 失败"; }
   rm -f "$W"
-  adb shell "chmod 755 $D/ksud; rm -f $D/.gl_ksu_pkg" >/dev/null 2>&1
+  adb shell "chmod 755 $D/ksud; rm -f $D/.gl_ksu_pkg $D/.gl_wrap.log" >/dev/null 2>&1
+  say "[*] wrapper 就绪（真 ksud 由 pm path 解析，运行时再兜底）"
 }
 
 gen_glrun() {  # gen_glrun <dest>
@@ -390,7 +418,12 @@ for (( r = 1; r <= ROUNDS; r++ )); do
       fi
       if [ "$(sho "test -f $D/native-$ts.rc && echo y")" = "y" ]; then break; fi
     done
-    [ "$handoff" = 1 ] && { [ "$WIN" = 1 ] || say "    [!] root 脚本起来了但没等到 KernelSU loaded"; break; }
+    if [ "$handoff" = 1 ] && [ "$WIN" != 1 ]; then
+      say "    [!] root 脚本起来了但没等到 KernelSU loaded，日志尾部："
+      adb shell "tail -n 5 $D/ksu-$ts.log 2>/dev/null" 2>/dev/null | tr -d '\r' | sed 's/^/      /'
+      adb shell "tail -n 3 $D/.gl_wrap.log 2>/dev/null" 2>/dev/null | tr -d '\r' | sed 's/^/      wrap: /'
+      break
+    fi
 
     [ "$WIN" = 1 ] && break
     [ "$DROPPED" = 1 ] && break
@@ -404,8 +437,8 @@ for (( r = 1; r <= ROUNDS; r++ )); do
     wait_shell || { say "[!] 设备没回来，退出"; break; }
     continue
   fi
-  say "[i] 本轮没中。等下一次重启（手机自己重启，或你手动重启）…"
-  if wait_cycle; then continue; else break; fi
+  say "[i] 本轮没中（设备没掉线）。窗口已过，重启手机后再跑；不等了。"
+  break
 done
 
 say ""
