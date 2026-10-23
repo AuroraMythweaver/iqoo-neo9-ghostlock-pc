@@ -21,7 +21,7 @@
 ## 解压后有什么
 
 ```
-ghostlock-pc-v1.2/
+ghostlock-pc-v1.2.1/
 ├── reroot.sh         主脚本（Linux/WSL）
 ├── reroot-mac.sh     主脚本（macOS 专用，只依赖系统自带工具）
 ├── install-ksu.sh    提权后：加载你自己的 .ko、装任意 KSU 管理器
