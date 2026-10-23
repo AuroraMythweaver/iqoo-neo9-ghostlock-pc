@@ -47,6 +47,7 @@ PKG_OPT=""
 KSUD_OPT=""
 LIST_MGRS=0
 INSTALL_APK=
+NO_FIRE=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -64,6 +65,7 @@ while [ $# -gt 0 ]; do
     --ksud)      KSUD_OPT="${2:-}"; [ -n "$KSUD_OPT" ] && shift ;;
     --list-managers) LIST_MGRS=1 ;;
     --install-apk) INSTALL_APK="${2:-}"; [ -n "$INSTALL_APK" ] && shift ;;
+    --no-fire)   NO_FIRE=1 ;;
 
     --pack)      shift; PACK="${1:-$PACK}" ;;
     *.bin)       PACK="$1" ;;
@@ -194,6 +196,10 @@ wait_cycle() {   # 等设备自己重启（掉线再回来）；超时返回 1
 
 select_ko() {   # 结果写进 KO_FILE；没有/跳过返回 1
   local list=() f i n
+  # 直接给了文件路径（绝对/相对）就用它
+  if [ -n "$KO_SEL" ] && [ "$KO_SEL" != none ] && [ -f "$KO_SEL" ]; then
+    KO_FILE="$KO_SEL"; say "[*] 使用 ko：$(basename "$KO_FILE")"; return 0
+  fi
   while IFS= read -r f; do list+=("$f"); done < <(find "$HERE" -maxdepth 1 -type f -name '*.ko' | sort)
   [ "${#list[@]}" -gt 0 ] || { say "[i] 本目录没有 .ko —— 用管理器自带的 ko"; return 1; }
   say ""
@@ -296,6 +302,10 @@ setup_ksu_target() {   # 决定这次 root 脚本用哪个 ksud、以及 --packa
   # B) 管理器 APK 里的 libksud.so
   lib=""
   [ -n "$pkg" ] && [ -z "$kreal" ] && lib="$(mgr_ksud "$pkg")"
+
+  if [ -n "$KO_FILE" ] && [ -z "$kreal" ] && [ -z "$lib" ]; then
+    say "[!] 没找到任何 ksud：先 adb install 管理器 APK，或 --ksud <ksud 二进制>"
+  fi
 
   if [ -n "$KO_FILE" ] || [ -n "$kreal" ]; then
     install_wrapper "${pkg:-com.sukisu.ultra}" "${kreal:-$lib}"
@@ -417,6 +427,7 @@ fi
 
 select_ko && :        # 只是填 KO_FILE
 setup_ksu_target
+[ "$NO_FIRE" = 1 ] && { say ""; say "[i] --no-fire：准备完成（payload/管理器/ko/wrapper 已就位），不发射"; exit 0; }
 
 say "[i] 最多 $ROUNDS 轮；脚本不会主动重启设备"
 
@@ -433,10 +444,8 @@ for (( r = 1; r <= ROUNDS; r++ )); do
   up="$(uptime_s)"; upi="${up%%.*}"
   if [ -n "$upi" ] && [ "$upi" -gt "$WINDOW" ] 2>/dev/null; then
     say "[i] 当前 uptime=${up}s，已经过了窗口（12~45 秒才容易中）"
-    say "    等手机自己重启，或你现在手动重启"
-    if wait_cycle; then say "[i] 设备已重启，继续"; continue; else
-      say "[!] 等不到重启，先退出；重启后再跑本脚本"; break
-    fi
+    say "    重启手机后再跑本脚本（脚本不会替你重启）"
+    break
   fi
   say "[i] 拿到 shell：uptime=${up}s（越早越好）"
 
