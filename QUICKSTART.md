@@ -45,6 +45,9 @@ chmod +x *.sh
 ./reroot.sh --deploy                 # 只部署 payload，不打
 ./reroot.sh --ko 1 --clean-after     # 一条龙：列 ko → 选 → 提权 → 成功后清理 → 退出
 
+# 还没装管理器？把上游 APK 放进来，一条命令装好再跑：
+./reroot.sh --install-apk SukiSU_v4.2.1-r1_41049-release.apk --ko 1 --clean-after
+
 # macOS 全程把 reroot.sh 换成 reroot-mac.sh
 ```
 

@@ -148,6 +148,18 @@ wrapper 一律 `exit 90`：
 并在 wrapper 里保留"运行时以 root 再 glob 一次"的兜底。另外 wrapper 会把自己的 `insmod` 输出
 写进 `$HOME_DIR/.gl_wrap.log`，失败时脚本会把该日志和 root 脚本尾部一起打出来。
 
+## 7.6 管理器首页显示"未安装"
+
+内核模块和 App 之间靠两件事对上：
+
+1. 加载时传的 `--package-name` 必须是**当前装着那个管理器的包名**；
+   不给的话 root 脚本会回落到 `me.weishu.kernelsu`，新版 SukiSU 就会显示"未安装"。
+2. 管理器 uapi 与内核模块 uapi 必须相等（见 §4）。
+
+v1.1 的脚本在 `--ko` 模式下会清空 `.gl_ksu_pkg`（为了让 root 脚本优先用 wrapper），
+包名就丢了；v1.2 改成由 wrapper 自己带上探测到的包名，纯管理器模式则把包名写进 `.gl_ksu_pkg`
+让 root 脚本自己去找 APK 里的 ksud。
+
 ## 8. 其它零散记录
 
 - 设备有两个用户（`0` 机主 / `666` XSpace）。shell 若挂在 666 上，`pm list packages` 会被限制（看不到 user 0 的包）。

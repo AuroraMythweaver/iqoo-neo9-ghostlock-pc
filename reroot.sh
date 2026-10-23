@@ -42,6 +42,10 @@ FORCE=0
 KO_SEL=""
 KO_FILE=""
 CLEAN_AFTER=0
+PKG_OPT=""
+KSUD_OPT=""
+LIST_MGRS=0
+INSTALL_APK=
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,6 +59,10 @@ while [ $# -gt 0 ]; do
     --ko)        KO_SEL="${2:-}"; [ -n "$KO_SEL" ] && shift ;;
     --no-ko)     KO_SEL=none ;;
     --clean-after) CLEAN_AFTER=1 ;;
+    --pkg)       PKG_OPT="${2:-}"; [ -n "$PKG_OPT" ] && shift ;;
+    --ksud)      KSUD_OPT="${2:-}"; [ -n "$KSUD_OPT" ] && shift ;;
+    --list-managers) LIST_MGRS=1 ;;
+    --install-apk) INSTALL_APK="${2:-}"; [ -n "$INSTALL_APK" ] && shift ;;
     --pack)      shift; PACK="${1:-$PACK}" ;;
     *.bin)       PACK="$1" ;;
     ''|*[!0-9]*) ;;
@@ -112,6 +120,7 @@ do_inspect() {
 
 # ---------------------------------------------------------------- adb 小工具
 sho() { timeout 8 adb shell "$1" 2>/dev/null | tr -d '\r'; }
+pushf() { timeout 60 adb push "$1" "$2" >/dev/null 2>&1; }
 uptime_s() { sho 'cut -d" " -f1 /proc/uptime' | head -n1; }
 dev_size() { sho "wc -c < $D/$1" | tr -d ' '; }
 
@@ -180,31 +189,28 @@ select_ko() {   # 结果写进 KO_FILE；没有/跳过返回 1
   say "[!] 编号无效"; return 1
 }
 
-install_user_ko() {   # 布置：user.ko + ksud wrapper（root 脚本 late-load 时先加载你的 ko）
-  [ -n "$KO_FILE" ] || return 0
-  say "[*] 指定 ko：$(basename "$KO_FILE")"
-  adb push "$KO_FILE" "$D/user.ko" >/dev/null 2>&1 || die "push ko 失败"
-  adb shell "chmod 644 $D/user.ko" >/dev/null 2>&1
+managers() {   # 已装的 KSU 系管理器包名
+  sho 'pm list packages 2>/dev/null' | sed 's/^package://' \
+    | grep -iE 'sukisu|resukisu|bakasu|kernelsu|ksunext|supermanager' | sort -u
+}
 
-  # 管理器包名 + 它 APK 里的 libksud.so
-  # 注意：/data/app 对 shell 不可列，glob 展开会失败，必须走 pm path
-  PKG_M="$(adb shell 'pm list packages 2>/dev/null' | tr -d '\r' | sed 's/^package://' \
-           | grep -iE 'sukisu|resukisu|bakasu|kernelsu|ksunext|supermanager' | head -1)"
-  [ -n "$PKG_M" ] || PKG_M=com.sukisu.ultra
-  APK_M="$(adb shell "pm path $PKG_M 2>/dev/null" | tr -d '\r' | sed 's/^package://' | head -1)"
-  LIB_M=""
-  [ -n "$APK_M" ] && LIB_M="$(dirname "$APK_M")/lib/arm64/libksud.so"
-  say "    manager=$PKG_M"
-  [ -n "$LIB_M" ] && say "    ksud=$LIB_M"
+mgr_ksud() {   # mgr_ksud <pkg> → 该 APK 内的 libksud.so（shell 可直接 stat；glob 不可用）
+  local apk
+  apk="$(sho "pm path $1 2>/dev/null" | sed 's/^package://' | head -1)"
+  [ -n "$apk" ] && printf '%s\n' "$(dirname "$apk")/lib/arm64/libksud.so"
+  return 0
+}
 
-  W="$(mktemp)"; cat > "$W" <<EOS
+install_wrapper() {   # install_wrapper <pkg> <real-ksud>
+  local pkg="$1" real="$2" w
+  w="$(mktemp)"; cat > "$w" <<EOS
 #!/system/bin/sh
-# install-ksu wrapper：late-load 时先 insmod 用户的 ko，再交给真 ksud 做 bootstrap
+# root 脚本的 ksud 入口：late-load 时先 insmod 指定 ko，再交给真 ksud 做 bootstrap
 KO='$D/user.ko'
-PKG='$PKG_M'
+PKG='$pkg'
 LOG='$D/.gl_wrap.log'
 REAL=''
-for R in '$LIB_M' /data/adb/ksu/bin/ksud /data/adb/ksud /data/local/tmp/ksud; do
+for R in '$real' /data/adb/ksu/bin/ksud /data/adb/ksud /data/local/tmp/ksud; do
   [ -n "\$R" ] && [ -x "\$R" ] && { REAL="\$R"; break; }
 done
 [ -n "\$REAL" ] || REAL=\$(ls -d /data/app/*/*/lib/arm64/libksud.so 2>/dev/null | head -1)
@@ -228,10 +234,55 @@ if [ "\$1" = "late-load" ]; then
 fi
 exec "\$REAL" "\$@"
 EOS
-  adb push "$W" "$D/ksud" >/dev/null 2>&1 || { rm -f "$W"; die "push wrapper 失败"; }
-  rm -f "$W"
-  adb shell "chmod 755 $D/ksud; rm -f $D/.gl_ksu_pkg $D/.gl_wrap.log" >/dev/null 2>&1
-  say "[*] wrapper 就绪（真 ksud 由 pm path 解析，运行时再兜底）"
+  pushf "$w" "$D/ksud" || { rm -f "$w"; die "push wrapper 失败"; }
+  rm -f "$w"
+  # 用 wrapper 时必须让 .gl_ksu_pkg 为空，root 脚本才会优先用 $HOME_DIR/ksud
+  sho "chmod 755 $D/ksud; rm -f $D/.gl_ksu_pkg $D/.gl_wrap.log" >/dev/null 2>&1
+  say "[*] ksud 入口已就绪（wrapper，包名 $pkg）"
+}
+
+setup_ksu_target() {   # 决定这次 root 脚本用哪个 ksud、以及 --package-name
+  local pkg lib kreal
+  # 先装管理器（可选）：装完下面的探测就能看到它
+  if [ -n "$INSTALL_APK" ]; then
+    say "[*] 安装管理器：$(basename "$INSTALL_APK")"
+    adb install -r "$INSTALL_APK" 2>&1 | tail -1 | sed 's/^/    /'
+  fi
+  pkg="$PKG_OPT"; [ -n "$pkg" ] || pkg="$(managers | head -1)"
+  kreal=""
+
+  # 0) 先把 ko 推上去（wrapper 会 insmod 它）
+  if [ -n "$KO_FILE" ]; then
+    pushf "$KO_FILE" "$D/user.ko" || die "push ko 失败"
+    sho "chmod 644 $D/user.ko" >/dev/null 2>&1
+  fi
+
+  # A) 用户直接给了 ksud 二进制（没有管理器也行）
+  if [ -n "$KSUD_OPT" ]; then
+    pushf "$KSUD_OPT" "$D/ksud.real" || die "push ksud 失败"
+    sho "chmod 755 $D/ksud.real" >/dev/null 2>&1
+    kreal="$D/ksud.real"
+    say "[*] ksud：$(basename "$KSUD_OPT")（用户指定）"
+  fi
+
+  # B) 管理器 APK 里的 libksud.so
+  lib=""
+  [ -n "$pkg" ] && [ -z "$kreal" ] && lib="$(mgr_ksud "$pkg")"
+
+  if [ -n "$KO_FILE" ] || [ -n "$kreal" ]; then
+    install_wrapper "${pkg:-com.sukisu.ultra}" "${kreal:-$lib}"
+    [ -n "$KO_FILE" ] && say "[*] 本次 ko：$(basename "$KO_FILE")"
+    [ -n "$kreal" ] || say "    loader：$lib"
+  else
+    # C) 纯管理器模式：包名写进 .gl_ksu_pkg，root 脚本自己去 APK 里找 ksud
+    if [ -n "$pkg" ]; then
+      sho "printf %s '$pkg' > $D/.gl_ksu_pkg; rm -f $D/ksud" >/dev/null 2>&1
+      say "[*] 管理器：$pkg"
+      say "    loader：$(mgr_ksud "$pkg")"
+    else
+      say "[!] 设备上没装 KSU 管理器，也没给 --ksud / --ko —— KSU 大概率加载不了"
+    fi
+  fi
 }
 
 gen_glrun() {  # gen_glrun <dest>
@@ -328,7 +379,16 @@ if [ "$CHECK_ONLY" = 1 ]; then
 fi
 
 need_deploy && deploy
-select_ko && install_user_ko
+
+if [ "$LIST_MGRS" = 1 ]; then
+  say "[已装的管理器]"; managers | sed 's/^/  /'
+  say ""
+  say "[本目录的 ko]"; find "$HERE" -maxdepth 1 -type f -name '*.ko' 2>/dev/null | sed 's|.*/|  |'
+  exit 0
+fi
+
+select_ko && :        # 只是填 KO_FILE
+setup_ksu_target
 
 say "[i] 最多 $ROUNDS 轮；脚本不会主动重启设备"
 
@@ -420,6 +480,8 @@ if [ "$WIN" = 1 ] || is_root; then
   show_status
   say ""
   say "用法：  adb shell su -c 'id'"
+  say "内核侧：  $(sho "su -c '/data/adb/ksud debug info 2>/dev/null'" | tr '\n' ' ' | cut -c1-120)"
+  say "内核侧：  $(adb shell "su -c '/data/adb/ksud debug info 2>/dev/null'" 2>/dev/null | tr -d '\r' | tr '\n' ' ' | cut -c1-120)"
   say "注意：  late-load 只在内存里 —— 硬重启就没了，重启后重跑本脚本。"
   if [ -n "$KO_FILE" ]; then
     say "        （本次用的是你的 ko：$(basename "$KO_FILE")，已写入 $D/user.ko，下次仍会用它）"

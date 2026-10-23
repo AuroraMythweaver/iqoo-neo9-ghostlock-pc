@@ -76,10 +76,14 @@ ghostlock-pc-v1.1/
 常用参数（`reroot.sh`）：
 
 ```bash
-./reroot.sh --check          # 只看当前有没有 root
-./reroot.sh --inspect        # 看 payload 包里有什么
-./reroot.sh --deploy         # 只把 payload 部署到手机，不打
-./reroot.sh 20               # 最多 20 轮
+./reroot.sh --check              # 只看当前有没有 root
+./reroot.sh --inspect            # 看 payload 包里有什么
+./reroot.sh --deploy             # 只把 payload 部署到手机，不打
+./reroot.sh --list-managers      # 列已装的 KSU 管理器
+./reroot.sh --pkg com.sukisu.ultra   # 装了两个管理器时指定用哪个
+./reroot.sh --install-apk x.apk  # 先装管理器再跑
+./reroot.sh --ksud ksud-aarch64  # 没有管理器时：直接用这个 ksud 二进制
+./reroot.sh 20                   # 最多 20 轮
 ```
 
 **一条龙**（列 ko → 你选 → 提权 → 成功后清理 → 退出）：
@@ -105,7 +109,24 @@ ghostlock-pc-v1.1/
 ./install-ksu.sh --persist --ko 1    # 以后每次 reroot.sh 都用这个 ko（需重启生效）
 ```
 
-已实测组合：**SukiSU-Ultra v4.2.1（uapi 5）+ `android13-5.15_kernelsu.ko`** → 首页「工作中 · 越狱模式」。
+已实测组合：**SukiSU-Ultra `v4.2.1-r1`（41049）+ `lkm-aarch64-android13-5.15_kernelsu.ko`** → 首页「工作中 · 越狱模式」。
+
+管理器与 ko 都取上游 `v4.2.1-r1`：
+
+```bash
+gh release download v4.2.1-r1 --repo SukiSU-Ultra/SukiSU-Ultra \
+    --pattern "SukiSU_v4.2.1-r1_41049-release.apk" \
+    --pattern "lkm-aarch64-android13-5.15_kernelsu.ko"
+```
+
+一条龙（装管理器 + 用你的 ko）：
+
+```bash
+./reroot.sh --install-apk SukiSU_v4.2.1-r1_41049-release.apk --ko 1 --clean-after
+```
+
+> 管理器首页显示"未安装"通常是两件事：**内核里记录的包名不是它**（脚本已改成自动带上
+> `--package-name`），或**管理器 uapi 比内核模块高**（换同版本的 ko / 管理器）。
 
 ### ko 从哪来
 
