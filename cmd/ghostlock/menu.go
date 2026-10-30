@@ -46,13 +46,17 @@ func cmdMenu() error {
 		if stdinEOF {
 			return nil
 		}
-		a, err := device.New("")
-		if err != nil {
-			return err
-		}
-		devices, _ := a.Devices()
-		online := len(devices) > 0
+		// adb 找不到时不要直接退出：双击运行的窗口会瞬间关掉，用户什么都看不到。
+		a, adbErr := device.NewWith("", adbPath)
+		var devices []string
+		online := false
 		status := "未连接（插线 + 开 USB 调试 + 授权这台电脑）"
+		if adbErr != nil {
+			status = "没找到 adb —— 按 6 指定 platform-tools 路径"
+		} else if ds, derr := a.Devices(); derr == nil {
+			devices = ds
+			online = len(ds) > 0
+		}
 		if online {
 			a.Serial = devices[0]
 			status = devices[0]
@@ -75,6 +79,7 @@ func cmdMenu() error {
 		fmt.Println("     3) 体检（只读）")
 		fmt.Println("     4) 选 ko / 装管理器")
 		fmt.Println("     5) 清理设备残留")
+		fmt.Println("     6) 指定 adb 路径（Windows 常见）")
 		fmt.Println("     0) 退出")
 		fmt.Print(nl)
 
@@ -93,6 +98,10 @@ func cmdMenu() error {
 			}
 		case "4":
 			if err := menuKo(a); err != nil {
+				fmt.Println(nl + "     错误: " + err.Error())
+			}
+		case "6":
+			if err := menuSetADB(); err != nil {
 				fmt.Println(nl + "     错误: " + err.Error())
 			}
 		case "5":
@@ -298,5 +307,25 @@ func menuClean(a *device.ADB) error {
 		return err
 	}
 	fmt.Printf("     已清理 %d 处：%s"+nl, len(gone), strings.Join(gone, ", "))
+	return nil
+}
+
+// menuSetADB lets a Windows user point at platform-tools without touching PATH.
+func menuSetADB() error {
+	fmt.Println(nl + "     给 adb.exe 的完整路径，或 platform-tools 目录，例如")
+	fmt.Println("     C:\\platform-tools  （目录也行，会在里面找 adb.exe）")
+	p := strings.Trim(ask("     adb 路径 > "), string([]byte{0x22, 0x27}))
+	if p == "" {
+		return nil
+	}
+	got, err := device.ResolveADB(p)
+	if err != nil {
+		return err
+	}
+	if err := device.SaveADBPath(p); err != nil {
+		return err
+	}
+	fmt.Printf("     已记住: %s"+nl, got)
+	fmt.Println("     下次运行直接用它")
 	return nil
 }

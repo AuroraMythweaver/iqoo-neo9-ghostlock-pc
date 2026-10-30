@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -16,13 +17,29 @@ import (
 	"ghostlock/internal/stage"
 )
 
-const version = "2.0.0"
+const version = "2.0.1"
+
+// adbPath comes from --adb (also accepted as a global flag on every command).
+var adbPath string
 
 func main() {
 	if err := dispatch(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "错误: "+err.Error())
+		waitForEnter()
 		os.Exit(1)
 	}
+}
+
+// waitForEnter keeps a double-clicked window open long enough to read the
+// error. Only when stdin is a terminal, so scripts are unaffected.
+func waitForEnter() {
+	info, err := os.Stdin.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Print("按回车退出…")
+	bufio.NewReader(os.Stdin).ReadString(byte(0x0a))
 }
 
 func dispatch(args []string) error {
@@ -54,8 +71,9 @@ func dispatch(args []string) error {
 }
 
 type common struct {
-	serial string
-	assets string
+	serial  string
+	assets  string
+	adbPath string
 }
 
 func addCommon(fs *flag.FlagSet) *common {
@@ -63,11 +81,17 @@ func addCommon(fs *flag.FlagSet) *common {
 	fs.StringVar(&c.serial, "s", "", "device serial")
 	fs.StringVar(&c.serial, "serial", "", "device serial")
 	fs.StringVar(&c.assets, "assets", "", "payload override directory")
+	fs.StringVar(&c.adbPath, "adb", "", "adb 可执行文件或 platform-tools 目录（默认查 PATH）")
 	return c
 }
 
-func (c *common) adb() (*device.ADB, error) { return device.New(c.serial) }
-func (c *common) loader() *assets.Loader    { return assets.New(c.assets) }
+func (c *common) adb() (*device.ADB, error) {
+	if c.adbPath != "" {
+		adbPath = c.adbPath
+	}
+	return device.NewWith(c.serial, adbPath)
+}
+func (c *common) loader() *assets.Loader { return assets.New(c.assets) }
 
 func cmdDoctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)

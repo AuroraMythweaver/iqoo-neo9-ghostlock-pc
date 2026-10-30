@@ -25,10 +25,15 @@ type ADB struct {
 }
 
 // New finds the adb binary and returns a client.
-func New(serial string) (*ADB, error) {
-	bin, err := exec.LookPath("adb")
+func New(serial string) (*ADB, error) { return NewWith(serial, "") }
+
+// NewWith honours an explicit adb path (flag), GHOSTLOCK_ADB, a remembered
+// path, then PATH. Windows users who unzipped platform-tools somewhere can
+// just point at the folder.
+func NewWith(serial, explicit string) (*ADB, error) {
+	bin, err := ResolveADB(explicit)
 	if err != nil {
-		return nil, fmt.Errorf("adb not found in PATH: %w", err)
+		return nil, err
 	}
 	return &ADB{Bin: bin, Serial: serial}, nil
 }

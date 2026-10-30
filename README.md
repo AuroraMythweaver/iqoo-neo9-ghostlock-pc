@@ -166,6 +166,18 @@ KSU 已经在内核内存里，清理不影响 root 本身。
 - 设备上会留下 `/data/local/tmp/ghostlock` 与 `/data/local/tmp/ksud`，可用上面的清理命令删掉
 - 第三方管理器 APK 请自行确认来源；本项目不附带 APK
 
+### Windows 上双击闪一下就没了？
+
+多半是**没装 adb**（或 adb 没进 PATH）。旧版会直接打印错误然后退出，双击的窗口
+来不及看见就关了。现在不会：
+
+- 菜单顶部会写「**没找到 adb —— 按 6 指定 platform-tools 路径**」
+- 按 `6` 填 platform-tools 目录（如 `C:\platform-tools`），会自动记住
+- 也可以命令行直接给：`ghostlock doctor --adb "C:\platform-tools"`
+- 出错时窗口会停住并提示「按回车退出」，不会再一闪而过
+
+adb 的查找顺序：`--adb` → 环境变量 `GHOSTLOCK_ADB` → 记住的路径 → PATH。
+
 ## 九、常见问题
 
 | 现象 | 原因 | 处理 |
@@ -177,6 +189,8 @@ KSU 已经在内核内存里，清理不影响 root 本身。
 | 一轮都打不中 | 命中率问题 | 多跑几轮；冷启动后再试 |
 | 管理器显示"未安装/需要更新管理器" | 管理器与内核模块版本不匹配 | `manager list` 看版本，`manager install` 换匹配的 APK |
 | `su` 不存在 | late-load 没成功 | 看 `/data/local/tmp/ghostlock/ksu-*.log` |
+| Windows 双击窗口秒关 | 没好 adb，或旧版直接退出 | 见上面「双击闪一下就没了」 |
+| `--adb 指定的路径无效` | 路径既不是 adb 也不是 platform-tools 目录 | 填目录或 adb.exe 完整路径 |
 
 ## 十、来源与免责
 
