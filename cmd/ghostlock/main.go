@@ -377,6 +377,10 @@ const usageText = `ghostlock-cli — vivo iQOO Neo9 (PD2338) 无解锁 root，�
   ghostlock manager install <apk>     安装 / 升级 KSU 管理器
   ghostlock version
 
+全局选项（所有子命令都认）:
+  --adb <路径>                 指定 adb 可执行文件或 platform-tools 目录
+                               找不到 adb 时也可以进菜单按 6 设置
+
 run 选项:
   -s, --serial <serial>        指定设备
   --conf <file.conf>           用自定义 profile（默认按 uname -r 自动匹配）
