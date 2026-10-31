@@ -198,6 +198,7 @@ func cmdRun(args []string) error {
 	window := fs.Int("window", 90, "uptime 窗口上沿（秒）")
 	rebootFirst := fs.Bool("reboot-first", false, "先主动重启抢窗口")
 	autoReboot := fs.Bool("auto-reboot", true, "干净失败（未 panic）时主动重启进下一轮")
+	payload := fs.String("payload", "auto", "payload: auto（交替）| native（26.1）| vrpatch（v1.2+ko）")
 	dryRun := fs.Bool("dry-run", false, "只打印将要执行的命令，不碰设备")
 	debugDir := fs.String("debug-dir", "", "失败后把 dmesg/iomem 落到该目录")
 	fs.Parse(args)
@@ -234,6 +235,7 @@ func cmdRun(args []string) error {
 			Window:      *window,
 			RebootFirst: *rebootFirst,
 			AutoReboot:  *autoReboot,
+			Payload:     *payload,
 			Out:         os.Stdout,
 		})
 		return err
@@ -354,7 +356,7 @@ func cmdAssets(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("payload: %s, %s, %s\n", assets.BinaryName, assets.VrPatchName, assets.ExtractName)
+		fmt.Printf("payload: %s, %s, %s, %s\n", assets.BinaryName, assets.BinaryV12, assets.VrPatchName, assets.ExtractName)
 		fmt.Printf("profiles: %d\n", len(names))
 		return nil
 	}
@@ -387,6 +389,7 @@ run 选项:
   --temp-root                  只拿临时 root，不晚加载 KSU（GHOSTLOCK_KSU_ENFORCE=9）
   --safe-mode                  root 后自动禁用 /data/adb/modules 下全部模块
   --no-vrpatch                 跳过 vrpatch.ko
+  --payload <mode>             auto（交替 26.1/v1.2）| native | vrpatch
   --ko <file|name>             用自己下载的 ko 代替 vrpatch.ko
   --force-attack               KernelSU 已有 root 时也强跑
   --main-cpu / --consumer-cpu  覆盖主/消费线程 CPU

@@ -18,7 +18,13 @@ var embedded embed.FS
 
 // Names of the files inside payload/.
 const (
-	BinaryName  = "ghostlock"
+	// BinaryName is the default payload (26.1 build: handles the vivo vr guard
+	// inside the exploit, no vrpatch.ko insmod).
+	BinaryName = "ghostlock-261"
+	// BinaryV12 is the older v1.2 build; it needs vrpatch.ko insmod before
+	// late-load. Kept because the two builds fail in different ways, so
+	// alternating them inside one boot window raises the hit rate.
+	BinaryV12   = "ghostlock-v12"
 	VrPatchName = "vrpatch.ko"
 	ExtractName = "ghostlock-extract"
 	// VerifiedBlobName is a profile blob taken from a release that was actually

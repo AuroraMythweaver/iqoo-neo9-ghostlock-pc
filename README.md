@@ -178,7 +178,38 @@ KSU 已经在内核内存里，清理不影响 root 本身。
 
 adb 的查找顺序：`--adb` → 环境变量 `GHOSTLOCK_ADB` → 记住的路径 → PATH。
 
-## 九、常见问题
+## 九、偏移值是怎么算出来的
+
+profile 里的数字不是猜的，全部来自**内核镜像本身**（工具 `ghostlock-extract` 就干这个）：
+
+| 字段 | 来源 | 算法 |
+|---|---|---|
+| offset.init_task / init_cred / selinux_enforcing / security_hook_heads / slide_* | **kallsyms** | 符号虚拟地址 − `_text` 基址 |
+| task_struct.* / cred.* | **BTF**（内核自带类型信息） | 结构体成员偏移 |
+| cred.caps_value / usage_value / ref*_image | init_cred 的实际内容 | 读镜像里 init_cred 的字段值 |
+| kernel_phys_load | 内核映像加载地址 | SM8550 = 0xA8000000（或由 `_text` 反推） |
+| kernel_phys_offset | `/proc/iomem` 的 System RAM 起始 | 0x80000000 |
+| route.*.waiter_shift | **BTF + 反汇编** | 从 `pselect` / `futex` 的 `add x, sp, #imm` 提取栈上 waiter 位移 |
+| route.*.task_offset / lock_offset | BTF | `rt_mutex_waiter` 的成员偏移 |
+
+自检对得上：conf 里 `init_task = 49493248`（0x2F33500），加上 KASLR 后的
+`_text`（0xffffff8028000000）正是运行日志里的 `init_task=ffffff802af33500`。
+
+换内核时用 `ghostlock-extract boot.img --format conf --out new.conf` 重新生成，
+再用 `ghostlock run --conf new.conf` 试。
+
+## 十、两种 payload（26.1 / v1.2）
+
+| 模式 | 用哪个 | 是否 insmod `vrpatch.ko` | 特点 |
+|---|---|---|---|
+| `native` | 26.1 的 `libghostlock.so`（685 KB） | 否 | vr 守卫在 exploit 内部处理，少一个环节 |
+| `vrpatch` | v1.2 的（474 KB） | 是 | 旧流程：fixup → `ksud insmod vrpatch.ko` → late-load |
+| `auto`（默认） | 交替 | 交替 | 同一次开机内奇数次 native、偶数次 vrpatch |
+
+两种 payload 的**失败形态不同**，同一个 uptime 窗口内交替能覆盖更多情况。
+这也解释了外部二改版为什么"2~3 轮就中"：它每次开机最多打 6 次，而不是 1 次。
+
+## 十一、常见问题
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
@@ -192,7 +223,7 @@ adb 的查找顺序：`--adb` → 环境变量 `GHOSTLOCK_ADB` → 记住的路�
 | Windows 双击窗口秒关 | 没好 adb，或旧版直接退出 | 见上面「双击闪一下就没了」 |
 | `--adb 指定的路径无效` | 路径既不是 adb 也不是 platform-tools 目录 | 填目录或 adb.exe 完整路径 |
 
-## 十、来源与免责
+## 十二、来源与免责
 
 - exploit 来自 GhostLock（CVE-2026-43499）作者发布的 APK，本项目只做 PC 侧驱动与 profile 编解码
 - KSU 内核模块与管理器来自 SukiSU Ultra 上游

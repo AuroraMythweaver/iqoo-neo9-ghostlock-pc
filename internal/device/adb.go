@@ -18,6 +18,12 @@ import (
 // retry loop dies silently.
 const callTimeout = 25 * time.Second
 
+// ioTimeout is for transfers that legitimately take minutes: adb install of a
+// 19 MB APK, pushing a 6 MB ksud. Killing these mid-flight leaves
+// PackageManager / the remote file half-written, which is exactly how a phone
+// ends up stuck and then reboots.
+const ioTimeout = 300 * time.Second
+
 // ADB is one adb client bound to an optional device serial.
 type ADB struct {
 	Bin    string
@@ -61,8 +67,10 @@ func (a *ADB) args(extra ...string) []string {
 	return append([]string{"-s", a.Serial}, extra...)
 }
 
-func (a *ADB) run(extra ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+func (a *ADB) run(extra ...string) (string, error) { return a.runT(callTimeout, extra...) }
+
+func (a *ADB) runT(d time.Duration, extra ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, a.Bin, a.args(extra...)...)
 	var out, errb bytes.Buffer
@@ -70,7 +78,7 @@ func (a *ADB) run(extra ...string) (string, error) {
 	cmd.Stderr = &errb
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
-		return "", fmt.Errorf("adb %s: timeout after %s", strings.Join(extra, " "), callTimeout)
+		return "", fmt.Errorf("adb %s: timeout after %s", strings.Join(extra, " "), d)
 	}
 	if err != nil {
 		msg := strings.TrimSpace(errb.String())
@@ -129,13 +137,13 @@ func (a *ADB) Stream(command string, w io.Writer, idle time.Duration) (string, e
 
 // Push copies a local file to the device.
 func (a *ADB) Push(local, remote string) error {
-	_, err := a.run("push", local, remote)
+	_, err := a.runT(ioTimeout, "push", local, remote)
 	return err
 }
 
 // Pull copies a device file to the host.
 func (a *ADB) Pull(remote, local string) error {
-	_, err := a.run("pull", remote, local)
+	_, err := a.runT(ioTimeout, "pull", remote, local)
 	return err
 }
 
@@ -162,5 +170,5 @@ func (a *ADB) WriteFile(remote, content string) error {
 
 // Install installs or replaces an APK on the device.
 func (a *ADB) Install(apk string) (string, error) {
-	return a.run("install", "-r", "-d", apk)
+	return a.runT(ioTimeout, "install", "-r", "-d", apk)
 }

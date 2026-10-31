@@ -65,6 +65,12 @@ func Execute(o *Options) (*Result, error) {
 	printf(o.Out, "• 设备    %s (%s) android %s, kernel %s"+nl, facts.Model, facts.Product, facts.AndroidVer, facts.KernelRelease)
 	printf(o.Out, "• selinux %s   ksud %s   kmi %s"+nl, facts.Selinux, orDash(facts.KsudPath), orDash(facts.Kmi))
 
+	if !o.Force && rooted(o.ADB) {
+		printf(o.Out, nl+"[+] 设备现在已经是 root（内核里有 kernelsu），不需要再打"+nl)
+		printf(o.Out, "    要强制重打请显式加 --force-attack（有 panic 风险）"+nl)
+		return &Result{TempRoot: true, KsuLoaded: true}, nil
+	}
+
 	var blob []byte
 	if o.BlobPath == "" && o.ConfPath == "" {
 		if b, ok := verifiedBlob(o, facts.KernelRelease); ok {

@@ -196,6 +196,7 @@ type Options struct {
 type Files struct {
 	Remote      string
 	Binary      string
+	BinaryV12   string
 	VrPatch     string
 	Profile     string
 	KsudLog     string
@@ -215,6 +216,7 @@ func Paths(remote string, withVrPatch bool, manager, kmi string) *Files {
 	f := &Files{
 		Remote:     remote,
 		Binary:     remote + "/" + assets.BinaryName,
+		BinaryV12:  remote + "/" + assets.BinaryV12,
 		VrPatch:    remote + "/" + assets.VrPatchName,
 		Profile:    remote + "/profile.bin",
 		KsudLog:    remote + "/ksud.log",
@@ -260,6 +262,15 @@ func Push(a *device.ADB, opts Options) (*Files, error) {
 	}
 	if _, err := a.Shell("chmod 755 " + files.Binary); err != nil {
 		return nil, err
+	}
+	// 旧版 payload 也推上去：自动模式下同一个开机窗口里交替使用两种。
+	if v12, verr := opts.Loader.Read(assets.BinaryV12); verr == nil {
+		p12 := filepath.Join(tmp, assets.BinaryV12)
+		if werr := os.WriteFile(p12, v12, 0o755); werr == nil {
+			if a.Push(p12, files.BinaryV12) == nil {
+				_, _ = a.Shell("chmod 755 " + files.BinaryV12)
+			}
+		}
 	}
 
 	if len(opts.KoOverride) > 0 {

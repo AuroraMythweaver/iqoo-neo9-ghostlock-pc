@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"ghostlock/internal/assets"
 	"ghostlock/internal/device"
 	"ghostlock/internal/ko"
+	mgrapi "ghostlock/internal/manager"
 	"ghostlock/internal/profile"
 	"ghostlock/internal/stage"
 )
@@ -22,14 +24,15 @@ import (
 // a guaranteed miss (and a reboot).
 type LoopOptions struct {
 	Base        *Options
-	Rounds      int  // 轮数上限，0 = 不限
-	PerBoot     int  // 每次开机窗口内连发几次
-	Window      int  // uptime 窗口上沿（秒）：v1.1 明文是 90
-	MinUptime   int  // 下沿（秒），0 = 不等；见 README 的实测数据
-	Timeout     int  // 单次发射等待（秒）
-	CycleWait   int  // 等设备自己重启（秒）
-	RebootFirst bool // 先主动重启再打
-	AutoReboot  bool // 一轮干净失败（没有 panic）时，主动重启进下一轮
+	Rounds      int    // 轮数上限，0 = 不限
+	PerBoot     int    // 每次开机窗口内连发几次
+	Window      int    // uptime 窗口上沿（秒）：v1.1 明文是 90
+	MinUptime   int    // 下沿（秒），0 = 不等；见 README 的实测数据
+	Timeout     int    // 单次发射等待（秒）
+	CycleWait   int    // 等设备自己重启（秒）
+	RebootFirst bool   // 先主动重启再打
+	AutoReboot  bool   // 一轮干净失败（没有 panic）时，主动重启进下一轮
+	Payload     string // auto | native | vrpatch
 	Out         io.Writer
 }
 
@@ -82,6 +85,9 @@ func Loop(lo *LoopOptions) (*Result, error) {
 	}
 	if lo.CycleWait <= 0 {
 		lo.CycleWait = 600
+	}
+	if lo.Payload == "" {
+		lo.Payload = "auto"
 	}
 
 	facts, err := stage.Probe(o.ADB)
@@ -165,6 +171,14 @@ func Loop(lo *LoopOptions) (*Result, error) {
 	// 管理器包名只解析一次（此时设备在跑，pm 可用）。绝不能放在每轮发射前：
 	// 那会给发射路径塞进最多十几秒的探测开销，直接把 uptime 时机毁掉。
 	if o.ManagerPkg == "" {
+		if apks := mgrapi.FindAPKs(); len(apks) > 0 {
+			newest := apks[len(apks)-1]
+			if info, aerr := mgrapi.InspectAPK(newest); aerr == nil && info.Package != "" && info.Package != mgrapi.ConfiguredManager() {
+				lo.printf("! 同级目录发现 %s（%s），但当前配置的管理器是 %s"+nl,
+					filepath.Base(newest), info.Package, orDash(mgrapi.ConfiguredManager()))
+				lo.printf("  想换用它就先跑: ghostlock manager install" + nl)
+			}
+		}
 		if pkg, rerr := stage.RefreshManager(o.ADB, o.Remote, ""); rerr == nil && pkg != "" {
 			manager = pkg
 			lo.printf("• manager %s（已写入 .gl_ksu_pkg）"+nl, pkg)
@@ -182,7 +196,7 @@ func Loop(lo *LoopOptions) (*Result, error) {
 		WithVrPatch: !o.NoVrPatch,
 		UserKo:      userKo,
 		RunScript:   true,
-		ForceAttack: true,
+		ForceAttack: o.Force,
 	})
 	if err != nil {
 		return nil, err
@@ -246,8 +260,30 @@ func Loop(lo *LoopOptions) (*Result, error) {
 
 		dropped := false
 		for n := 1; n <= lo.PerBoot; n++ {
-			lo.printf("---- 第 %d 轮 / 第 %d 次（uptime=%.0fs）----"+nl, r, n, up)
-			res := fire(o.ADB, files, lo.Timeout, lo.printf)
+			mode := "native"
+			switch lo.Payload {
+			case "vrpatch":
+				mode = "vrpatch"
+			case "auto":
+				// 同一个开机窗口里交替两套：奇数次用 26.1（自带 vr guard），
+				// 偶数次用 v1.2 + vrpatch.ko。两种失败形态不同，交替能覆盖更多。
+				if n%2 == 0 {
+					mode = "vrpatch"
+				}
+			}
+			lo.printf("---- 第 %d 轮 / 第 %d 次（uptime=%.0fs, %s）----"+nl, r, n, up, mode)
+			res := fire(o.ADB, files, lo.Timeout, mode, lo.printf)
+			if res.TempRoot && !res.Won {
+				// 临时 root 已经拿到（root 脚本以 uid0 跑过），内核状态（cred /
+				// SELinux / vrpatch）已经被改过。这时再发第二发只会 panic 重启，
+				// 把刚拿到的 root 一起弄没。
+				lo.printf("[!] 临时 root 已拿到，但 KernelSU 未加载")
+				lo.printf("    停止本轮：内核状态已改过，再发射会 panic 重启")
+				if res.Tail != "" {
+					lo.printf("    %s"+nl, res.Tail)
+				}
+				return &Result{TempRoot: true, Notes: []string{"KSU 未加载：" + res.Tail}}, nil
+			}
 			if res.Won {
 				if o.CleanAfter {
 					if gone, cerr := stage.Clean(o.ADB, stage.CleanOptions{Remote: o.Remote}); cerr == nil {
@@ -292,17 +328,18 @@ func Loop(lo *LoopOptions) (*Result, error) {
 }
 
 type fireResult struct {
-	Won     bool
-	Dropped bool
-	Tail    string
+	Won      bool
+	Dropped  bool
+	TempRoot bool // root 脚本已经以 uid0 启动过：内核状态已被改动，绝不能再发第二发
+	Tail     string
 }
 
 // fire launches one attempt in the background and watches its KSU log for the
 // success marker, while detecting the panic/reboot a miss causes.
-func fire(a *device.ADB, f *stage.Files, timeout int, say func(string, ...any)) *fireResult {
+func fire(a *device.ADB, f *stage.Files, timeout int, mode string, say func(string, ...any)) *fireResult {
 	ts := fmt.Sprintf("%d", time.Now().UnixNano()/int64(time.Millisecond))
-	launch := fmt.Sprintf("cd %s && GL_RUN_ID=%s setsid sh %s </dev/null >/dev/null 2>&1 & echo go",
-		f.Remote, ts, f.RunScript)
+	launch := fmt.Sprintf("cd %s && GL_RUN_ID=%s setsid sh %s %s </dev/null >/dev/null 2>&1 & echo go",
+		f.Remote, ts, f.RunScript, mode)
 	if _, err := a.Shell(launch); err != nil {
 		return &fireResult{Dropped: true}
 	}
@@ -327,10 +364,11 @@ func fire(a *device.ADB, f *stage.Files, timeout int, say func(string, ...any)) 
 		if strings.Contains(klog, "fixup failed") ||
 			strings.Contains(klog, "KernelSU module not loaded") ||
 			strings.Contains(klog, "ksud missing") {
-			res.Tail = lastLine(klog)
+			res.Tail = lastLines(klog, 3)
 			return res
 		}
 		if strings.Contains(klog, "root script start") {
+			res.TempRoot = true
 			if !handoff {
 				handoff = true
 				deadline = time.Now().Add(120 * time.Second)
@@ -433,4 +471,23 @@ func rooted(a *device.ADB) bool {
 		return true
 	}
 	return a.IsRoot()
+}
+
+// lastLines keeps the last n non-empty lines, for a short failure digest.
+func lastLines(s string, n int) string {
+	var keep []string
+	for _, l := range strings.Split(s, nl) {
+		l = strings.TrimSpace(stripANSI(l))
+		if l != "" {
+			keep = append(keep, l)
+		}
+	}
+	if len(keep) > n {
+		keep = keep[len(keep)-n:]
+	}
+	out := strings.Join(keep, " | ")
+	if len(out) > 240 {
+		out = out[:240]
+	}
+	return out
 }

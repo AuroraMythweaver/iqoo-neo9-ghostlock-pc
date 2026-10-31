@@ -135,6 +135,12 @@ func menuRoot(a *device.ADB, online bool) error {
 	}
 	o := defaultOptions(a)
 
+	mode := "auto"
+	if v := ask("     payload？[1] auto 交替  [2] native 26.1  [3] vrpatch 旧版  [默认 1] > "); v == "2" {
+		mode = "native"
+	} else if v == "3" {
+		mode = "vrpatch"
+	}
 	rounds := 10
 	if v := ask("     最多几轮？[默认 10] > "); v != "" {
 		fmt.Sscanf(v, "%d", &rounds)
@@ -151,6 +157,11 @@ func menuRoot(a *device.ADB, online bool) error {
 	if v := ask("     先主动重启抢窗口？[Y/n] > "); v == "n" || v == "N" {
 		reboot = false
 	}
+	cleanAfter := true
+	if v := ask("     成功后自动清理设备痕迹？[Y/n] > "); v == "n" || v == "N" {
+		cleanAfter = false
+	}
+	o.CleanAfter = cleanAfter
 	if o.KoPath != "" {
 		fmt.Printf("     使用 ko: %s"+nl, o.KoPath)
 	} else {
@@ -166,6 +177,7 @@ func menuRoot(a *device.ADB, online bool) error {
 		CycleWait:   600,
 		RebootFirst: reboot,
 		AutoReboot:  true,
+		Payload:     mode,
 		Out:         os.Stdout,
 	})
 	return err
