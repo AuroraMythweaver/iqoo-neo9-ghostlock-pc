@@ -17,7 +17,7 @@ import (
 	"ghostlock/internal/stage"
 )
 
-const version = "2.0.1"
+const version = "2.0.2"
 
 // adbPath comes from --adb (also accepted as a global flag on every command).
 var adbPath string

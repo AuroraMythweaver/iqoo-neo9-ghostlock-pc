@@ -27,6 +27,7 @@ var ManagerPackages = []string{
 	"me.weishu.kernelsu.pr",
 	"com.rifsxd.ksunext",
 	"com.sukisu.ultra",
+	"com.sukisu.nova",
 	"com.sukisu.sukisu",
 	"com.resukisu.resukisu",
 	"com.kowx712.supermanager",

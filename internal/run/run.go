@@ -216,8 +216,10 @@ func buildCommand(o *Options, f *stage.Files) string {
 	if o.TempRoot {
 		enforce = "9"
 	}
-	parts := []string{
-		"cd " + f.Remote,
+	// 注意：cd 后面必须是 &&。只用空格拼的话，cd 会把后面的赋值和命令
+	// 全部当成自己的参数，shell 报 "cd: too many arguments"，adb 返回非零，
+	// 看起来就像"adb 出错"而程序根本没跑。
+	envs := []string{
 		"GHOSTLOCK_HOME=" + f.Remote,
 		"TMPDIR=" + f.Remote,
 		"HOME=" + f.Remote,
@@ -225,13 +227,13 @@ func buildCommand(o *Options, f *stage.Files) string {
 		"GHOSTLOCK_KSU_ENFORCE=" + enforce,
 	}
 	if f.VrPatch != "" {
-		parts = append(parts, "GHOSTLOCK_VRPATCH_KO="+f.VrPatch)
+		envs = append(envs, "GHOSTLOCK_VRPATCH_KO="+f.VrPatch)
 	}
 	if o.MainCPU != "" {
-		parts = append(parts, "GHOSTLOCK_MAIN_CPU="+o.MainCPU)
+		envs = append(envs, "GHOSTLOCK_MAIN_CPU="+o.MainCPU)
 	}
 	if o.ConsumerCPU != "" {
-		parts = append(parts, "GHOSTLOCK_CONSUMER_CPU="+o.ConsumerCPU)
+		envs = append(envs, "GHOSTLOCK_CONSUMER_CPU="+o.ConsumerCPU)
 	}
 	args := []string{"./" + assets.BinaryName, "--load-prebuilt-profile", f.Profile}
 	if o.Force {
@@ -240,8 +242,7 @@ func buildCommand(o *Options, f *stage.Files) string {
 	if o.DebugDir != "" {
 		args = append(args, "--dump-kernel-log", o.DebugDir)
 	}
-	parts = append(parts, strings.Join(args, " "))
-	return strings.Join(parts, " ")
+	return "cd " + f.Remote + " && " + strings.Join(envs, " ") + " " + strings.Join(args, " ")
 }
 
 func interpret(out string, runErr error) *Result {
